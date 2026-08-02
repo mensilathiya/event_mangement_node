@@ -1,35 +1,8 @@
-const Event = require("../models/event.model");
-// post api 
+const eventService = require("../services/event.service");
+//create event
 exports.createEvent = async (req, res, next) => {
   try {
-    const {
-      title,
-      description,
-      startDateTime,
-      endDateTime,
-      venueName,
-      latitude,
-      longitude,
-      address,
-      termsConditions,
-      videoLinks,
-    } = req.body;
-
-    const event = await Event.create({
-      title,
-      description,
-      startDateTime,
-      endDateTime,
-      venueName,
-      latitude,
-      longitude,
-      address,
-      termsConditions,
-      videoLinks: videoLinks
-        ? JSON.parse(videoLinks)
-        : [],
-      image: req.file ? req.file.path : "",
-    });
+    const event = await eventService.createEvent(req.body, req.file );
 
     return res.status(201).json({
       success: true,
@@ -40,12 +13,10 @@ exports.createEvent = async (req, res, next) => {
     next(error);
   }
 };
-// get api
+// get by id
 exports.getEventById = async (req, res, next) => {
   try {
-    const { id } = req.params;
-
-    const event = await Event.findById(id);
+    const event = await eventService.getEventById(req.params.id);
 
     if (!event) {
       return res.status(404).json({
@@ -63,16 +34,23 @@ exports.getEventById = async (req, res, next) => {
     next(error);
   }
 };
-// get all events
-export const getAllEvents = async (req, res) => {
+// Get All Events
+exports.getAllEvents = async (req, res, next) => {
   try {
     const result = await eventService.getAllEvents(req.query);
 
     return res.status(200).json(result);
   } catch (error) {
-    return res.status(error.statusCode || 500).json({
-      success: false,
-      message: error.message || "Something went wrong",
-    });
+    next(error);
+  }
+};
+// Change Event Status
+exports.changeEventStatus = async (req, res, next) => {
+  try {
+    const result = await eventService.changeEventStatus(req.params.id);
+
+    return res.status(200).json(result);
+  } catch (error) {
+    next(error);
   }
 };

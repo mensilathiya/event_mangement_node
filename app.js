@@ -6,6 +6,10 @@ const healthRoutes = require("./routes/health.routes");
 const authRoutes = require("./routes/auth.routes");
 const userRoutes = require("./routes/user.routes");
 const eventRoutes = require('./routes/event.routes');
+const ticketTypeRoutes = require("./routes/ticketType.routes");
+const bookingRoutes = require("./routes/booking.routes");
+const bookingTicketRoutes = require("./routes/bookingTicket.routes");
+const qrRoutes = require("./routes/qr.routes");
 const app = express();
 
 // ---------- Core Middlewares ----------
@@ -24,8 +28,17 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 // events
 app.use("/api/events", eventRoutes);
+// ticket 
+app.use("/api/ticket-type", ticketTypeRoutes);
+// booking
+app.use("/api/bookings", bookingRoutes);;
+// booking ticket
+app.use("/api/booking-ticket", bookingTicketRoutes);
+// qr routes
+app.use("/api/qr", qrRoutes);
 // image 
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
 // ---------- 404 Handler ----------
 app.use((req, res) => {
   res.status(404).json({

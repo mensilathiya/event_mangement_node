@@ -1,39 +1,38 @@
 const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
+const AppError = require("../utils/AppError");
 
-const uploadPath = "uploads/events";
+// Memory Storage
+const storage = multer.memoryStorage();
 
-if (!fs.existsSync(uploadPath)) {
-  fs.mkdirSync(uploadPath, { recursive: true });
-}
+// Allowed MIME Types
+const allowedMimeTypes = [
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+];
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadPath);
-  },
-  filename: (req, file, cb) => {
-    const fileName = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, fileName + path.extname(file.originalname));
-  },
-});
-
+// File Filter
 const fileFilter = (req, file, cb) => {
-  const allowed = /jpg|jpeg|png|webp/;
-
-  const isValid =
-    allowed.test(path.extname(file.originalname).toLowerCase()) &&
-    allowed.test(file.mimetype);
-
-  if (isValid) {
-    cb(null, true);
-  } else {
-    cb(new Error("Only image files are allowed."));
+  if (!allowedMimeTypes.includes(file.mimetype)) {
+    return cb(
+      new AppError(
+        "Only JPG, JPEG, PNG and WEBP images are allowed.",
+        400
+      ),
+      false
+    );
   }
+
+  cb(null, true);
 };
 
+// Upload Middleware
 const upload = multer({
   storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5 MB
+  },
   fileFilter,
 });
 

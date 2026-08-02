@@ -38,12 +38,17 @@ const eventSchema = new mongoose.Schema(
     },
     image: {
       type: String,
-      required: true,
+      default: "",
+    },
+    imagePublicId: {
+      type: String,
+      default: "",
     },
     termsConditions: {
       type: String,
       required: true,
     },
+
     videoLinks: [
       {
         type: String,
@@ -57,6 +62,7 @@ const eventSchema = new mongoose.Schema(
   {
     timestamps: true,
   }
+
 );
 
 module.exports = mongoose.model("Event", eventSchema);
