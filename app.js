@@ -10,6 +10,7 @@ const ticketTypeRoutes = require("./routes/ticketType.routes");
 const bookingRoutes = require("./routes/booking.routes");
 const bookingTicketRoutes = require("./routes/bookingTicket.routes");
 const qrRoutes = require("./routes/qr.routes");
+const entryReportRoutes = require("./routes/entryReport.routes");
 const app = express();
 
 // ---------- Core Middlewares ----------
@@ -36,6 +37,7 @@ app.use("/api/bookings", bookingRoutes);;
 app.use("/api/booking-ticket", bookingTicketRoutes);
 // qr routes
 app.use("/api/qr", qrRoutes);
+app.use("/api/entry-report", entryReportRoutes);
 // image 
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 

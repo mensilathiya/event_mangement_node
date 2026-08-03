@@ -2,7 +2,7 @@ const jwt = require("jsonwebtoken");
 
 const BookingTicket = require("../models/bookingTicket.model");
 const AppError = require("../utils/AppError");
-
+ // verfiy qr
 const verifyQr = async ({ qrToken }) => {
   // ==========================
   // 1. Verify QR Token
@@ -112,7 +112,50 @@ const verifyQr = async ({ qrToken }) => {
     },
   };
 };
+// ================= CHECK-IN QR =================
+const checkInQr = async ({ qrToken, scannedBy }) => {
+  // 1. Verify JWT
+  let payload;
 
+  try {
+    payload = jwt.verify(qrToken, process.env.JWT_SECRET);
+  } catch (error) {
+    throw new AppError("Invalid or expired QR code.", 401);
+  }
+
+  // 2. Find Ticket
+  const ticket = await BookingTicket.findOne({
+    ticketNumber: payload.ticketNumber,
+  });
+
+  if (!ticket) {
+    throw new AppError("Ticket not found.", 404);
+  }
+
+  // 3. Status Validation
+  if (ticket.status === "Used") {
+    throw new AppError("This ticket has already been checked in.", 400);
+  }
+
+  if (ticket.status === "Cancelled") {
+    throw new AppError("This ticket has been cancelled.", 400);
+  }
+
+  // 4. Update Ticket
+  ticket.status = "Used";
+  ticket.scannedAt = new Date();
+  ticket.scannedBy = scannedBy;
+
+  await ticket.save();
+
+  return {
+    ticketId: ticket._id,
+    ticketNumber: ticket.ticketNumber,
+    status: ticket.status,
+    scannedAt: ticket.scannedAt,
+  };
+};
 module.exports = {
   verifyQr,
+  checkInQr,
 };

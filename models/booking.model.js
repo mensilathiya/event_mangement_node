@@ -71,10 +71,7 @@ const bookingSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
-    remark: {
-      type: String,
-      trim: true,
-    },
+   
 
     isDeleted: {
       type: Boolean,

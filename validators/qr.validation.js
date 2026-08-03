@@ -1,14 +1,26 @@
 const { body, validationResult } = require("express-validator");
 
+// ================= VERIFY QR =================
 exports.verifyQrValidation = [
   body("qrToken")
+    .trim()
     .notEmpty()
     .withMessage("QR Token is required")
     .isString()
-    .withMessage("QR Token must be a string")
-    .trim(),
+    .withMessage("QR Token must be a string"),
 ];
 
+// ================= CHECK-IN QR =================
+exports.checkInQrValidation = [
+  body("qrToken")
+    .trim()
+    .notEmpty()
+    .withMessage("QR Token is required")
+    .isString()
+    .withMessage("QR Token must be a string"),
+];
+
+// ================= VALIDATION RESULT =================
 exports.validate = (req, res, next) => {
   const errors = validationResult(req);
 

@@ -17,7 +17,24 @@ const verifyQr = async (req, res, next) => {
     next(error);
   }
 };
+// ================= CHECK-IN QR =================
+const checkInQr = async (req, res, next) => {
+  try {
+    const result = await qrService.checkInQr({
+      qrToken: req.body.qrToken,
+      scannedBy: req.user._id,
+    });
 
+    return res.status(200).json({
+      success: true,
+      message: "Ticket checked in successfully.",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 module.exports = {
   verifyQr,
+   checkInQr,
 };

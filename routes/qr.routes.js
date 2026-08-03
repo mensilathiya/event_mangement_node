@@ -6,9 +6,11 @@ const { protect } = require("../middlewares/auth.middleware");
 const qrController = require("../controllers/qr.controller");
 const {
   verifyQrValidation,
+  checkInQrValidation,
   validate,
-} = require("../validations/qr.validation");
+} = require("../validators/qr.validation");
 
+// verfiy
 router.post(
   "/verify",
   protect,
@@ -16,5 +18,12 @@ router.post(
   validate,
   qrController.verifyQr
 );
-
+//  check-in
+router.post(
+  "/check-in",
+  protect,
+  checkInQrValidation,
+  validate,
+  qrController.checkInQr
+);
 module.exports = router;
