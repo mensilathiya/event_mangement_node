@@ -1,25 +1,25 @@
 const BookingTicket = require("../models/bookingTicket.model");
-const Booking = require("../models/booking.model");
-
+const Event = require("../models/event.model");
 const getAllEntryReports = async (query) => {
   let {
+    eventId,
     page = 1,
     limit = 10,
     bookingId = "",
+    ticketId = "",
     mobileNumber = "",
-    qrCode = "",
     name = "",
     startDate,
     endDate,
-    sortBy = "scannedAt",
-    sortOrder = "desc",
   } = query;
 
-  page = Number(page) || 1;
-  limit = Number(limit) || 10;
+  page = parseInt(page, 10) || 1;
+  limit = parseInt(limit, 10) || 10;
+
   const skip = (page - 1) * limit;
 
   const filter = {
+    eventId,
     status: "Used",
   };
 
@@ -30,9 +30,9 @@ const getAllEntryReports = async (query) => {
     };
   }
 
-  if (qrCode) {
+  if (ticketId) {
     filter.ticketNumber = {
-      $regex: qrCode,
+      $regex: ticketId,
       $options: "i",
     };
   }
@@ -59,39 +59,54 @@ const getAllEntryReports = async (query) => {
     }
 
     if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      filter.scannedAt.$lte = end;
+      const lastDate = new Date(endDate);
+      lastDate.setHours(23, 59, 59, 999);
+      filter.scannedAt.$lte = lastDate;
     }
   }
 
-  const sort = {
-    [sortBy]: sortOrder === "asc" ? 1 : -1,
-  };
+  const [event, tickets, total] = await Promise.all([
 
-  const [rows, total] = await Promise.all([
+    Event.findById(eventId)
+      .select("name startDateTime endDateTime")
+      .lean(),
+
     BookingTicket.find(filter)
       .populate({
-        path: "bookingId",
-        select:
-          "bookingNumber quantity amount bookingStatus createdBy createdAt",
-        populate: {
-          path: "createdBy",
-          select: "name mobile email",
-        },
+        path: "eventId",
+        select: "startDateTime endDateTime"
       })
-      .populate("eventId", "title startDateTime venueName")
-      .populate("ticketTypeId", "ticketName amount")
-      .populate("scannedBy", "name mobile email")
-      .sort(sort)
+      .sort({ scannedAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
 
     BookingTicket.countDocuments(filter),
+
   ]);
 
+  const rows = tickets.map((ticket) => ({
+    _id: ticket._id,
+
+    profileImage: ticket.attendee?.profileImage || "",
+
+    bookingId: ticket.bookingNumber,
+
+    ticketId: ticket.ticketNumber,
+
+    qrImage: ticket.qrImage,
+
+    name: ticket.attendee?.name || "-",
+
+    mobileNumber: ticket.attendee?.mobileNumber || "-",
+
+    passDate: ticket.eventId?.startDateTime || null,
+
+    scannedAt: ticket.scannedAt,
+  }));
+
   return {
+    event,
     rows,
     pagination: {
       page,

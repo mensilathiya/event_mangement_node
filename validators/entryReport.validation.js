@@ -1,6 +1,12 @@
 const { query } = require("express-validator");
 
 const getAllEntryReportValidation = [
+  query("eventId")
+    .notEmpty()
+    .withMessage("Event Id is required")
+    .isMongoId()
+    .withMessage("Invalid Event Id"),
+
   query("page")
     .optional()
     .isInt({ min: 1 })
@@ -13,9 +19,11 @@ const getAllEntryReportValidation = [
 
   query("bookingId")
     .optional()
-    .trim()
-    .isLength({ max: 50 })
-    .withMessage("Booking Id is too long"),
+    .trim(),
+
+  query("ticketId")
+    .optional()
+    .trim(),
 
   query("mobileNumber")
     .optional()
@@ -23,17 +31,9 @@ const getAllEntryReportValidation = [
     .matches(/^[0-9]{0,10}$/)
     .withMessage("Invalid mobile number"),
 
-  query("qrCode")
-    .optional()
-    .trim()
-    .isLength({ max: 100 })
-    .withMessage("QR Code is too long"),
-
   query("name")
     .optional()
-    .trim()
-    .isLength({ max: 100 })
-    .withMessage("Name is too long"),
+    .trim(),
 
   query("startDate")
     .optional()
@@ -44,21 +44,6 @@ const getAllEntryReportValidation = [
     .optional()
     .isISO8601()
     .withMessage("Invalid end date"),
-
-  query("sortBy")
-    .optional()
-    .isIn([
-      "scannedAt",
-      "bookingNumber",
-      "ticketNumber",
-      "createdAt",
-    ])
-    .withMessage("Invalid sortBy field"),
-
-  query("sortOrder")
-    .optional()
-    .isIn(["asc", "desc"])
-    .withMessage("sortOrder must be asc or desc"),
 ];
 
 module.exports = {
