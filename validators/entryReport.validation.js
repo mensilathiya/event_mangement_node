@@ -1,9 +1,8 @@
 const { query } = require("express-validator");
-
+// get all entery report
 const getAllEntryReportValidation = [
   query("eventId")
-    .notEmpty()
-    .withMessage("Event Id is required")
+    .optional()
     .isMongoId()
     .withMessage("Invalid Event Id"),
 
@@ -36,16 +35,21 @@ const getAllEntryReportValidation = [
     .trim(),
 
   query("startDate")
-    .optional()
+    .optional({ checkFalsy: true })
     .isISO8601()
     .withMessage("Invalid start date"),
 
   query("endDate")
-    .optional()
+    .optional({ checkFalsy: true })
     .isISO8601()
     .withMessage("Invalid end date"),
+];
+// export entery report excel
+const exportEntryReportValidation = [
+  ...getAllEntryReportValidation,
 ];
 
 module.exports = {
   getAllEntryReportValidation,
+  exportEntryReportValidation,
 };

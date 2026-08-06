@@ -2,6 +2,10 @@ const qrService = require("../services/qr.service");
 
 // ================= VERIFY QR =================
 const verifyQr = async (req, res, next) => {
+   console.log("========== VERIFY ==========");
+  console.log("User:", req.user?._id);
+  console.log("Body:", req.body);
+
   try {
     const result = await qrService.verifyQr({
       qrToken: req.body.qrToken,
