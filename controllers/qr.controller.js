@@ -2,7 +2,9 @@ const qrService = require("../services/qr.service");
 
 // ================= VERIFY QR =================
 const verifyQr = async (req, res, next) => {
-   console.log("========== VERIFY ==========");
+
+     console.log("========== VERIFY API HIT ==========");
+  console.log("Body:", req.body);
   console.log("User:", req.user?._id);
   console.log("Body:", req.body);
 
@@ -23,6 +25,8 @@ const verifyQr = async (req, res, next) => {
 };
 // ================= CHECK-IN QR =================
 const checkInQr = async (req, res, next) => {
+    console.log("========== CHECK-IN API HIT ==========");
+  console.log("Body:", req.body);
   try {
     const result = await qrService.checkInQr({
       qrToken: req.body.qrToken,
