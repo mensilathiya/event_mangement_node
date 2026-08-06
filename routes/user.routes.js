@@ -3,7 +3,7 @@ const router = express.Router();
 
 const userController = require("../controllers/user.controller");
 const { protect } = require("../middlewares/auth.middleware");
-
+const upload = require("../middlewares/upload.middleware");
 const {
   createUserValidation,
   validate,
@@ -13,6 +13,7 @@ const {
 router.post(
   "/",
   protect,
+  upload.single("profileImage"),
   createUserValidation,
   validate,
   userController.createUser
@@ -27,6 +28,7 @@ router.get(
 router.put(
   "/:id",
   protect,
+  upload.single("profileImage"),
   userController.updateUser
 );
 // delete users

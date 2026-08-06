@@ -2,7 +2,11 @@ const userService = require("../services/user.service");
 // create user
 const createUser = async (req, res, next) => {
   try {
-    const result = await userService.createUser(req.user, req.body);
+    const result = await userService.createUser(
+      req.user,
+      req.body,
+      req.file
+    );
 
     return res.status(201).json({
       success: true,
@@ -30,9 +34,10 @@ const getUsers = async (req, res, next) => {
 const updateUser = async (req, res, next) => {
   try {
     const result = await userService.updateUser(
-      req.params.id,
-      req.body
-    );
+  req.params.id,
+  req.body,
+  req.file
+);
 
     return res.status(200).json({
       success: true,
@@ -59,6 +64,6 @@ const deleteUser = async (req, res, next) => {
 module.exports = {
   createUser,
   getUsers,
-    updateUser,
-      deleteUser,
+  updateUser,
+  deleteUser,
 };

@@ -1,8 +1,11 @@
-const User = require("../models/User");
+const User = require("../models/user.model");
 const AppError = require("../utils/AppError");
+const uploadToCloudinary = require("../utils/cloudinary.util");
+const deleteFromCloudinary = require("../utils/deleteCloudinaryFile");
 // create user
-const createUser = async (admin, data) => {
-
+const createUser = async (admin, data, file) => {
+console.log("BODY:", data);
+console.log("EMAIL:", JSON.stringify(data.email));
   if (!admin || admin.role !== "admin") {
     throw new AppError("Only Admin can create users", 403);
   }
@@ -10,11 +13,11 @@ const createUser = async (admin, data) => {
   const {
     name,
     mobile,
-    email,
     password,
     confirmPassword,
-    profileImage
   } = data;
+
+  const email = data.email?.trim() || null;
 
   if (!name || !mobile || !password || !confirmPassword) {
     throw new AppError("All required fields are mandatory", 400);
@@ -37,7 +40,18 @@ const createUser = async (admin, data) => {
       throw new AppError("Email already exists", 409);
     }
   }
+  let profileImage = "";
+  let profileImagePublicId = "";
 
+  if (file) {
+    const uploadedImage = await uploadToCloudinary(
+      file.buffer,
+      "event-management/users"
+    );
+
+    profileImage = uploadedImage.url;
+    profileImagePublicId = uploadedImage.public_id;
+  }
   const user = await User.create({
     name,
     mobile,
@@ -45,6 +59,7 @@ const createUser = async (admin, data) => {
     password,
     profileImage,
     role: "checker",
+    profileImagePublicId,
     createdBy: admin._id
   });
 
@@ -60,7 +75,7 @@ const getUsers = async (query) => {
 
   const filter = {
     role: "checker",
-      status: "active",
+    status: "active",
 
   };
 
@@ -91,7 +106,7 @@ const getUsers = async (query) => {
   };
 };
 // update user
-const updateUser = async (id, data) => {
+const updateUser = async (id, data, file) => {
   const {
     name,
     mobile,
@@ -129,7 +144,22 @@ const updateUser = async (id, data) => {
       throw new AppError("Email already exists", 409);
     }
   }
+  let profileImage = user.profileImage;
+  let profileImagePublicId = user.profileImagePublicId;
 
+  if (file) {
+    if (profileImagePublicId) {
+      await deleteFromCloudinary(profileImagePublicId);
+    }
+
+    const uploadedImage = await uploadToCloudinary(
+      file.buffer,
+      "event-management/users"
+    );
+
+    profileImage = uploadedImage.url;
+    profileImagePublicId = uploadedImage.public_id;
+  }
   const updatedUser = await User.findByIdAndUpdate(
     id,
     {
@@ -137,6 +167,8 @@ const updateUser = async (id, data) => {
       mobile,
       email,
       status,
+      profileImage,
+      profileImagePublicId,
       ...(password && { password }),
     },
     {
@@ -154,8 +186,14 @@ const deleteUser = async (id) => {
   if (!user) {
     throw new AppError("User not found", 404);
   }
+  if (user.profileImagePublicId) {
+    await deleteFromCloudinary(user.profileImagePublicId);
 
+    user.profileImage = "";
+    user.profileImagePublicId = "";
+  }
   user.status = "inactive";
+
   await user.save();
 
   return user;

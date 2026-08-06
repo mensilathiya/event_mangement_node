@@ -21,8 +21,14 @@ const userSchema = new Schema(
     },
 
     profileImage: {
-      type: String, // stored path/URL of the uploaded image
-      default: null,
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    profileImagePublicId: {
+      type: String,
+      default: "",
       trim: true,
     },
 
@@ -36,20 +42,11 @@ const userSchema = new Schema(
 
     email: {
       type: String,
-      required: false,
       trim: true,
       lowercase: true,
       default: null,
-      // allows multiple docs with null/undefined email while still enforcing
-      // uniqueness whenever an email value is actually provided
-      unique: true,
-      sparse: true,
-      match: [
-        /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-        'Please enter a valid email address',
-      ],
     },
-
+   
     password: {
       type: String,
       required: [true, 'Password is required'],
@@ -87,7 +84,15 @@ const userSchema = new Schema(
     versionKey: false,
   }
 );
-
+userSchema.index(
+  { email: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      email: { $type: "string" },
+    },
+  }
+);
 
 /* -------------------------------------------------------------------------- */
 /* Hooks                                                                       */
