@@ -5,12 +5,11 @@ import TicketType from "../models/ticketType.model.js";
 
 // Get Active Event
 const getActiveEvent = async () => {
-    const now = new Date();
-
     return await Event.findOne({
-        startDateTime: { $lte: now },
-        endDateTime: { $gte: now },
+        isActive: true,
+        isDeleted: false, // જો field હોય તો
     })
+        .sort({ startDateTime: 1 })
         .select("_id title startDateTime endDateTime")
         .lean();
 };
@@ -147,16 +146,16 @@ export const getDashboardSummary = async () => {
     const activeEvent = await getActiveEvent();
 
     if (!activeEvent) {
-    return {
-        activeEvent: null,
-        todayBooking: 0,
-        todayPassBooking: 0,
-        totalBooking: 0,
-        totalPassBooking: 0,
-        bookingCounts: [],
-        totalBookingDetails: [],
-    };
-}
+        return {
+            activeEvent: null,
+            todayBooking: 0,
+            todayPassBooking: 0,
+            totalBooking: 0,
+            totalPassBooking: 0,
+            bookingCounts: [],
+            totalBookingDetails: [],
+        };
+    }
 
 
     const todayBooking = await getTodayBooking(activeEvent._id);
@@ -165,16 +164,16 @@ export const getDashboardSummary = async () => {
     const totalPassBooking = await getTotalPassBooking(activeEvent._id);
     const bookingCounts = await getBookingCounts(activeEvent._id);
     const totalBookingDetails = await getTotalBookingDetails(
-    activeEvent._id
-);
+        activeEvent._id
+    );
 
     return {
-    activeEvent,
-    todayBooking,
-    todayPassBooking,
-    totalBooking,
-    totalPassBooking,
-    bookingCounts,
-    totalBookingDetails,
-};
+        activeEvent,
+        todayBooking,
+        todayPassBooking,
+        totalBooking,
+        totalPassBooking,
+        bookingCounts,
+        totalBookingDetails,
+    };
 };
