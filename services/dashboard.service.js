@@ -5,13 +5,19 @@ import TicketType from "../models/ticketType.model.js";
 
 // Get Active Event
 const getActiveEvent = async () => {
-    return await Event.findOne({
+    const events = await Event.find().lean();
+
+    console.log("All Events:", events);
+
+    const activeEvent = await Event.findOne({
         isActive: true,
-        isDeleted: false, // જો field હોય તો
     })
         .sort({ startDateTime: 1 })
-        .select("_id title startDateTime endDateTime")
         .lean();
+
+    console.log("Active Event:", activeEvent);
+
+    return activeEvent;
 };
 
 
