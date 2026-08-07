@@ -61,7 +61,12 @@ const createBooking = async (data) => {
     if (!event) {
       throw new AppError("Event not found", 404);
     }
-
+    if (event.status !== "Active") {
+      throw new AppError(
+        "Booking cannot be created because the event is inactive.",
+        400
+      );
+    }
     const ticketType = await TicketType.findOneAndUpdate(
       {
         _id: ticketTypeId,
@@ -188,15 +193,30 @@ const getAllBookings = async (query) => {
     bookingId,
     mobileNumber,
     name,
-    eventId,
     createdBy,
     status,
     fromDate,
     toDate,
   } = query;
+  const activeEvent = await Event.findOne({ status: "Active" });
 
-  const filter = { isDeleted: false, };
+  if (!activeEvent) {
+    return {
+      event: null,
+      rows: [],
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total: 0,
+        totalPages: 0,
+      },
+    };
+  }
 
+  const filter = {
+    eventId: activeEvent._id,
+    isDeleted: false,
+  };
   if (bookingId) {
     filter.bookingNumber = { $regex: bookingId, $options: "i" };
   }
@@ -207,10 +227,6 @@ const getAllBookings = async (query) => {
 
   if (name) {
     filter.name = { $regex: name, $options: "i" };
-  }
-
-  if (eventId) {
-    filter.eventId = eventId;
   }
 
   if (createdBy) {
@@ -250,7 +266,8 @@ const getAllBookings = async (query) => {
     .limit(Number(limit));
 
   return {
-    bookings,
+    event: activeEvent,
+    rows: bookings,
     pagination: {
       total,
       page: Number(page),
