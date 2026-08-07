@@ -17,16 +17,19 @@ const createTicketTypeValidation = [
     .isInt({ min: 1 })
     .withMessage("Allow Day Count must be a number"),
 
+  body("allowDates")
+    .isArray({ min: 1 })
+    .withMessage("At least one Allow Date is required"),
+
+  body("allowDates.*")
+    .isISO8601()
+    .withMessage("Invalid Allow Date"),
+
   body("amount")
     .notEmpty()
     .withMessage("Amount is required")
     .isFloat({ min: 0 })
     .withMessage("Amount must be a valid number"),
-
-  body("allowDate")
-    .optional({ checkFalsy: true })
-    .isISO8601()
-    .withMessage("Invalid Allow Date"),
 
   body("availableCount")
     .notEmpty()
@@ -38,6 +41,27 @@ const createTicketTypeValidation = [
     .trim()
     .notEmpty()
     .withMessage("Description is required"),
+
+  // Custom Validation
+  body("allowDates").custom((allowDates, { req }) => {
+    const allowDayCount = Number(req.body.allowDayCount);
+
+    if (allowDates.length !== allowDayCount) {
+      throw new Error(
+        `Allow Day Count (${allowDayCount}) must match the selected dates (${allowDates.length}).`
+      );
+    }
+
+    const uniqueDates = new Set(
+      allowDates.map((date) => new Date(date).toISOString().split("T")[0])
+    );
+
+    if (uniqueDates.size !== allowDates.length) {
+      throw new Error("Duplicate Allow Dates are not allowed.");
+    }
+
+    return true;
+  }),
 ];
 
 // Validation Result

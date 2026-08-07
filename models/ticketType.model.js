@@ -23,11 +23,10 @@ const ticketTypeSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
-
-    allowDate: {
-      type: Date,
-      default: null,
-    },
+   allowDates: {
+  type: [Date],
+  default: [],
+},
 
     availableCount: {
       type: Number,
