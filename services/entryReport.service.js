@@ -18,8 +18,7 @@ const getAllEntryReports = async (query) => {
 
   if (!eventId) {
     const activeEvent = await Event.findOne({
-      startDateTime: { $lte: now },
-      endDateTime: { $gte: now },
+      isActive: true,
     })
       .select("_id startDateTime endDateTime")
       .lean();
@@ -151,8 +150,7 @@ const exportEntryReport = async (query, res) => {
     const now = new Date();
 
     const activeEvent = await Event.findOne({
-      startDateTime: { $lte: now },
-      endDateTime: { $gte: now },
+      isActive: true,
     })
       .select("_id name startDateTime endDateTime")
       .lean();
