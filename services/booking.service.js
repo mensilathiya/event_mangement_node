@@ -358,6 +358,263 @@ const deleteBooking = async (bookingId, remark, deletedBy) => {
 
   return booking;
 };
+// ================= EXPORT ALL BOOKINGS =================
+const exportBookings = async (query, res) => {
+  const {
+    bookingId,
+    mobileNumber,
+    name,
+    createdBy,
+    status,
+    fromDate,
+    toDate,
+  } = query;
+
+  // ================= FIND ACTIVE EVENT =================
+  const activeEvent = await Event.findOne({
+    isActive: true,
+  }).select("_id title startDateTime endDateTime");
+
+  if (!activeEvent) {
+    throw new AppError("No active event found.", 404);
+  }
+
+  // ================= BUILD FILTER =================
+  const filter = {
+    eventId: activeEvent._id,
+  };
+
+  // ================= DELETED / SUCCESS STATUS =================
+  if (status === "Deleted") {
+    filter.isDeleted = true;
+  } else {
+    // Default + Success
+    filter.isDeleted = false;
+  }
+
+  // ================= BOOKING ID FILTER =================
+  if (bookingId?.trim()) {
+    filter.bookingNumber = {
+      $regex: bookingId.trim(),
+      $options: "i",
+    };
+  }
+
+  // ================= MOBILE NUMBER FILTER =================
+  if (mobileNumber?.trim()) {
+    filter.mobileNumber = {
+      $regex: mobileNumber.trim(),
+      $options: "i",
+    };
+  }
+
+  // ================= NAME FILTER =================
+  if (name?.trim()) {
+    filter.name = {
+      $regex: name.trim(),
+      $options: "i",
+    };
+  }
+
+  // ================= CREATED BY FILTER =================
+  if (createdBy) {
+    filter.createdBy = createdBy;
+  }
+
+  // ================= DATE FILTER =================
+  if (fromDate || toDate) {
+    filter.createdAt = {};
+
+    if (fromDate) {
+      const startDate = new Date(fromDate);
+
+      if (!Number.isNaN(startDate.getTime())) {
+        startDate.setHours(0, 0, 0, 0);
+        filter.createdAt.$gte = startDate;
+      }
+    }
+
+    if (toDate) {
+      const endDate = new Date(toDate);
+
+      if (!Number.isNaN(endDate.getTime())) {
+        endDate.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = endDate;
+      }
+    }
+
+    // Remove empty createdAt filter
+    if (Object.keys(filter.createdAt).length === 0) {
+      delete filter.createdAt;
+    }
+  }
+
+  // ================= FETCH ALL BOOKINGS =================
+  const bookings = await Booking.find(filter)
+    .populate(
+      "eventId",
+      "title startDateTime endDateTime"
+    )
+    .populate(
+      "ticketTypeId",
+      "ticketName amount"
+    )
+    .populate(
+      "createdBy",
+      "name"
+    )
+    .sort({
+      createdAt: -1,
+    })
+    .lean();
+
+  // ================= WORKBOOK =================
+  const ExcelJS = require("exceljs");
+
+  const workbook = new ExcelJS.Workbook();
+
+  workbook.creator = "Event Management CRM";
+  workbook.created = new Date();
+
+  const worksheet = workbook.addWorksheet("Booking Report");
+
+  worksheet.columns = [
+    {
+      header: "Booking Id",
+      key: "bookingId",
+      width: 22,
+    },
+    {
+      header: "Name",
+      key: "name",
+      width: 25,
+    },
+    {
+      header: "Mobile Number",
+      key: "mobile",
+      width: 18,
+    },
+    {
+      header: "Email",
+      key: "email",
+      width: 30,
+    },
+    {
+      header: "Event",
+      key: "event",
+      width: 25,
+    },
+    {
+      header: "Ticket Type",
+      key: "ticketType",
+      width: 22,
+    },
+    {
+      header: "Quantity",
+      key: "quantity",
+      width: 12,
+    },
+    {
+      header: "Amount",
+      key: "amount",
+      width: 15,
+    },
+    {
+      header: "Discount",
+      key: "discount",
+      width: 15,
+    },
+    {
+      header: "Created By",
+      key: "createdBy",
+      width: 22,
+    },
+    {
+      header: "Remark",
+      key: "remark",
+      width: 30,
+    },
+    {
+      header: "Created At",
+      key: "createdAt",
+      width: 22,
+    },
+    {
+      header: "Status",
+      key: "status",
+      width: 15,
+    },
+  ];
+
+  // ================= HEADER STYLE =================
+  worksheet.getRow(1).font = {
+    bold: true,
+    color: {
+      argb: "FFFFFFFF",
+    },
+  };
+
+  worksheet.getRow(1).fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: {
+      argb: "1F4E78",
+    },
+  };
+
+  worksheet.getRow(1).alignment = {
+    vertical: "middle",
+    horizontal: "center",
+  };
+
+  // ================= ROWS =================
+  bookings.forEach((item) => {
+    worksheet.addRow({
+      bookingId: item.bookingNumber || "-",
+
+      name: item.name || "-",
+
+      mobile: item.mobileNumber || "-",
+
+      email: item.email || "-",
+
+      event: item.eventId?.title || "-",
+
+      ticketType: item.ticketTypeId?.ticketName || "-",
+
+      quantity: item.quantity ?? 0,
+
+      amount: item.amount ?? 0,
+
+      discount: item.discount ?? 0,
+
+      createdBy: item.createdBy?.name || "-",
+
+      remark: item.remark || "-",
+
+      createdAt: item.createdAt
+        ? new Date(item.createdAt).toLocaleString("en-GB")
+        : "-",
+
+      status: item.isDeleted ? "Deleted" : "Success",
+    });
+  });
+
+  // ================= DOWNLOAD =================
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename=BookingReport_${Date.now()}.xlsx`
+  );
+
+  await workbook.xlsx.write(res);
+
+  res.end();
+};
 // get booking by id
 // ================= GET BOOKING BY ID =================
 const getBookingById = async (bookingId) => {
@@ -394,5 +651,6 @@ module.exports = {
   createBooking,
   getAllBookings,
   deleteBooking,
-  getBookingById
+  getBookingById,
+    exportBookings
 };

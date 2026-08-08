@@ -12,6 +12,7 @@ const bookingTicketRoutes = require("./routes/bookingTicket.routes");
 const qrRoutes = require("./routes/qr.routes");
 const entryReportRoutes = require("./routes/entryReport.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
+const roleRoutes = require("./routes/role.routes");
 const app = express();
 
 // ---------- Core Middlewares ----------
@@ -42,6 +43,10 @@ app.use("/api/qr", qrRoutes);
 app.use("/api/entry-report", entryReportRoutes);
 //dashboard
 app.use("/api/dashboard", dashboardRoutes);
+// ROLE
+app.use("/api/roles", roleRoutes);
+// export
+app.use("/api/bookings", bookingRoutes);
 // image 
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 

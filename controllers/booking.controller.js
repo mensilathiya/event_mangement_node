@@ -68,11 +68,19 @@ const getBookingById = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+};const exportBookingsController = async (req, res, next) => {
+  try {
+    await bookingService.exportBookings(req.query, res);
+  } catch (error) {
+    next(error);
+  }
 };
+
 module.exports = {
   createBooking,
   getAllBookings,
   deleteBooking,
-  getBookingById
+  getBookingById,
+  exportBookingsController,
 };
 

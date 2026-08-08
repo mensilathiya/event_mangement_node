@@ -7,6 +7,7 @@ const {
   createBookingValidation,
   validate,
 } = require("../validators/booking.validator");
+
 const { protect } = require("../middlewares/auth.middleware");
 
 // Create Booking
@@ -20,20 +21,30 @@ router.post(
 
 // Get All Bookings
 router.get(
-    "/get-all-bookings",
-    protect,
-    bookingController.getAllBookings
+  "/get-all-bookings",
+  protect,
+  bookingController.getAllBookings
 );
-// delete bookings
+
+// Export Bookings
+router.get(
+  "/export",
+  protect,
+  bookingController.exportBookingsController
+);
+
+// Delete Booking
 router.delete(
   "/delete/:id",
   protect,
   bookingController.deleteBooking
 );
-// get all booking by id
+
+// Get Booking By ID
 router.get(
   "/:id",
   protect,
   bookingController.getBookingById
 );
+
 module.exports = router;
