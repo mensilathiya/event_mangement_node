@@ -25,7 +25,7 @@ const getAllBookings = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: "Bookings fetched successfully",
-      data: result.bookings,
+      data: result.rows,
       pagination: result.pagination,
     });
   } catch (error) {
