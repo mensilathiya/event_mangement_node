@@ -1,7 +1,8 @@
 const BookingTicket = require("../models/bookingTicket.model");
 const Event = require("../models/event.model");
 const ExcelJS = require("exceljs");
-// get all entery report
+
+// ================= GET ALL ENTRY REPORT =================
 const getAllEntryReports = async (query) => {
   let {
     eventId,
@@ -14,7 +15,8 @@ const getAllEntryReports = async (query) => {
     startDate,
     endDate,
   } = query;
-  const now = new Date();
+
+  // ================= ACTIVE EVENT =================
 
   if (!eventId) {
     const activeEvent = await Event.findOne({
@@ -29,10 +31,13 @@ const getAllEntryReports = async (query) => {
 
     eventId = activeEvent._id;
   }
+
   page = parseInt(page, 10) || 1;
   limit = parseInt(limit, 10) || 10;
 
   const skip = (page - 1) * limit;
+
+  // ================= FILTER =================
 
   const filter = {
     eventId,
@@ -77,20 +82,22 @@ const getAllEntryReports = async (query) => {
     if (endDate) {
       const lastDate = new Date(endDate);
       lastDate.setHours(23, 59, 59, 999);
+
       filter.scannedAt.$lte = lastDate;
     }
   }
 
-  const [event, tickets, total] = await Promise.all([
+  // ================= FETCH DATA =================
 
+  const [event, tickets, total] = await Promise.all([
     Event.findById(eventId)
-      .select("name startDateTime endDateTime")
+      .select("name title startDateTime endDateTime")
       .lean(),
 
     BookingTicket.find(filter)
       .populate({
         path: "eventId",
-        select: "startDateTime endDateTime"
+        select: "startDateTime endDateTime",
       })
       .sort({ scannedAt: -1 })
       .skip(skip)
@@ -98,8 +105,9 @@ const getAllEntryReports = async (query) => {
       .lean(),
 
     BookingTicket.countDocuments(filter),
-
   ]);
+
+  // ================= FORMAT ROWS =================
 
   const rows = tickets.map((ticket) => ({
     _id: ticket._id,
@@ -110,7 +118,7 @@ const getAllEntryReports = async (query) => {
 
     ticketId: ticket.ticketNumber,
 
-    qrImage: ticket.qrImage,
+    qrImage: ticket.qrImage || "",
 
     name: ticket.attendee?.name || "-",
 
@@ -118,12 +126,14 @@ const getAllEntryReports = async (query) => {
 
     passDate: ticket.eventId?.startDateTime || null,
 
-    scannedAt: ticket.scannedAt,
+    scannedAt: ticket.scannedAt || null,
   }));
 
   return {
     event,
+
     rows,
+
     pagination: {
       page,
       limit,
@@ -132,7 +142,9 @@ const getAllEntryReports = async (query) => {
     },
   };
 };
-// export entery report
+
+// ================= EXPORT ENTRY REPORT =================
+
 const exportEntryReport = async (query, res) => {
   let {
     eventId,
@@ -147,12 +159,10 @@ const exportEntryReport = async (query, res) => {
   // ================= ACTIVE EVENT =================
 
   if (!eventId) {
-    const now = new Date();
-
     const activeEvent = await Event.findOne({
       isActive: true,
     })
-      .select("_id name startDateTime endDateTime")
+      .select("_id name title startDateTime endDateTime")
       .lean();
 
     if (!activeEvent) {
@@ -215,16 +225,14 @@ const exportEntryReport = async (query, res) => {
   // ================= DATA =================
 
   const rows = await BookingTicket.find(filter)
-    .select(
-      `
+    .select(`
       bookingNumber
       ticketNumber
       qrImage
       scannedAt
       createdAt
       attendee
-    `
-    )
+    `)
     .sort({ scannedAt: -1 })
     .lean();
 
@@ -238,27 +246,63 @@ const exportEntryReport = async (query, res) => {
   const worksheet = workbook.addWorksheet("Entry Report");
 
   worksheet.columns = [
-    { header: "Booking Id", key: "bookingId", width: 22 },
-    { header: "Ticket Id", key: "ticketId", width: 22 },
-    { header: "Name", key: "name", width: 25 },
-    { header: "Mobile Number", key: "mobile", width: 18 },
-    { header: "Pass Date", key: "passDate", width: 22 },
-    { header: "Scanned At", key: "scannedAt", width: 24 },
-    { header: "QR Image", key: "qrImage", width: 45 },
-    { header: "Profile Image", key: "profileImage", width: 45 },
+    {
+      header: "Booking Id",
+      key: "bookingId",
+      width: 22,
+    },
+    {
+      header: "Ticket Id",
+      key: "ticketId",
+      width: 22,
+    },
+    {
+      header: "Name",
+      key: "name",
+      width: 25,
+    },
+    {
+      header: "Mobile Number",
+      key: "mobile",
+      width: 18,
+    },
+    {
+      header: "Pass Date",
+      key: "passDate",
+      width: 22,
+    },
+    {
+      header: "Scanned At",
+      key: "scannedAt",
+      width: 24,
+    },
+    {
+      header: "QR Image",
+      key: "qrImage",
+      width: 45,
+    },
+    {
+      header: "Profile Image",
+      key: "profileImage",
+      width: 45,
+    },
   ];
 
   // ================= HEADER STYLE =================
 
   worksheet.getRow(1).font = {
     bold: true,
-    color: { argb: "FFFFFFFF" },
+    color: {
+      argb: "FFFFFFFF",
+    },
   };
 
   worksheet.getRow(1).fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "1F4E78" },
+    fgColor: {
+      argb: "1F4E78",
+    },
   };
 
   worksheet.getRow(1).alignment = {
@@ -271,16 +315,23 @@ const exportEntryReport = async (query, res) => {
   rows.forEach((item) => {
     worksheet.addRow({
       bookingId: item.bookingNumber,
+
       ticketId: item.ticketNumber,
+
       name: item.attendee?.name || "-",
+
       mobile: item.attendee?.mobileNumber || "-",
+
       passDate: item.createdAt
         ? new Date(item.createdAt).toLocaleDateString("en-GB")
         : "-",
+
       scannedAt: item.scannedAt
         ? new Date(item.scannedAt).toLocaleString("en-GB")
         : "-",
+
       qrImage: item.qrImage || "-",
+
       profileImage: item.attendee?.profileImage || "-",
     });
   });
@@ -301,6 +352,7 @@ const exportEntryReport = async (query, res) => {
 
   res.end();
 };
+
 module.exports = {
   getAllEntryReports,
   exportEntryReport,
