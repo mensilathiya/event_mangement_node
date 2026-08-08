@@ -57,16 +57,10 @@ const createBooking = async (data) => {
       throw new AppError("Invalid booking amount", 400);
     }
     const event = await Event.findById(eventId).session(session);
-console.log("========== BOOKING EVENT DEBUG ==========");
-console.log("eventId from frontend:", eventId);
-console.log("event found:", event?._id);
-console.log("event isActive:", event?.isActive);
-console.log("event status:", event?.status);
-console.log("========================================");
     if (!event) {
       throw new AppError("Event not found", 404);
     }
-    if (event.isActive !== "Active") {
+    if (!event.isActive) {
       throw new AppError(
         "Booking cannot be created because the event is inactive.",
         400
@@ -191,6 +185,7 @@ console.log("========================================");
 };
 
 // get all booking
+// ================= GET ALL BOOKINGS =================
 const getAllBookings = async (query) => {
   const {
     page = 1,
@@ -203,81 +198,138 @@ const getAllBookings = async (query) => {
     fromDate,
     toDate,
   } = query;
-  const activeEvent = await Event.findOne({ isActive: "Active" });
 
+  // Convert pagination values to numbers
+  const currentPage = Math.max(Number(page) || 1, 1);
+  const pageLimit = Math.max(Number(limit) || 10, 1);
+
+  // ================= FIND ACTIVE EVENT =================
+  const activeEvent = await Event.findOne({
+    isActive: true,
+  }).select("_id title startDateTime endDateTime");
+
+  // No active event
   if (!activeEvent) {
     return {
       event: null,
       rows: [],
       pagination: {
-        page: Number(page),
-        limit: Number(limit),
+        page: currentPage,
+        limit: pageLimit,
         total: 0,
         totalPages: 0,
       },
     };
   }
 
+  // ================= BUILD FILTER =================
   const filter = {
     eventId: activeEvent._id,
-    isDeleted: false,
   };
-  if (bookingId) {
-    filter.bookingNumber = { $regex: bookingId, $options: "i" };
+
+  // ================= DELETED / SUCCESS STATUS =================
+  if (status === "Deleted") {
+    filter.isDeleted = true;
+  } else {
+    // Default + Success
+    filter.isDeleted = false;
   }
 
-  if (mobileNumber) {
-    filter.mobileNumber = { $regex: mobileNumber, $options: "i" };
+  // ================= BOOKING ID FILTER =================
+  if (bookingId?.trim()) {
+    filter.bookingNumber = {
+      $regex: bookingId.trim(),
+      $options: "i",
+    };
   }
 
-  if (name) {
-    filter.name = { $regex: name, $options: "i" };
+  // ================= MOBILE NUMBER FILTER =================
+  if (mobileNumber?.trim()) {
+    filter.mobileNumber = {
+      $regex: mobileNumber.trim(),
+      $options: "i",
+    };
   }
 
+  // ================= NAME FILTER =================
+  if (name?.trim()) {
+    filter.name = {
+      $regex: name.trim(),
+      $options: "i",
+    };
+  }
+
+  // ================= CREATED BY FILTER =================
   if (createdBy) {
     filter.createdBy = createdBy;
   }
 
-  if (status === "Success") {
-    filter.isDeleted = false;
-  }
-
-  if (status === "Deleted") {
-    filter.isDeleted = true;
-  }
-
+  // ================= DATE FILTER =================
   if (fromDate || toDate) {
     filter.createdAt = {};
 
     if (fromDate) {
-      filter.createdAt.$gte = new Date(fromDate);
+      const startDate = new Date(fromDate);
+
+      if (!Number.isNaN(startDate.getTime())) {
+        startDate.setHours(0, 0, 0, 0);
+        filter.createdAt.$gte = startDate;
+      }
     }
 
     if (toDate) {
       const endDate = new Date(toDate);
-      endDate.setHours(23, 59, 59, 999);
-      filter.createdAt.$lte = endDate;
+
+      if (!Number.isNaN(endDate.getTime())) {
+        endDate.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = endDate;
+      }
+    }
+
+    // Remove empty createdAt filter
+    if (Object.keys(filter.createdAt).length === 0) {
+      delete filter.createdAt;
     }
   }
 
+  // ================= TOTAL COUNT =================
   const total = await Booking.countDocuments(filter);
 
-  const bookings = await Booking.find(filter)
-    .populate("eventId", "title startDateTime")
-    .populate("ticketTypeId", "ticketName amount")
-    .populate("createdBy", "name")
-    .sort({ createdAt: -1 })
-    .skip((page - 1) * limit)
-    .limit(Number(limit));
+  const totalPages = Math.ceil(total / pageLimit);
 
+  // ================= PAGINATION OFFSET =================
+  const skip = (currentPage - 1) * pageLimit;
+
+  // ================= FETCH BOOKINGS =================
+  const bookings = await Booking.find(filter)
+    .populate(
+      "eventId",
+      "title startDateTime endDateTime"
+    )
+    .populate(
+      "ticketTypeId",
+      "ticketName amount"
+    )
+    .populate(
+      "createdBy",
+      "name"
+    )
+    .sort({
+      createdAt: -1,
+    })
+    .skip(skip)
+    .limit(pageLimit)
+    .lean();
+
+  // ================= RESPONSE =================
   return {
     event: activeEvent,
     rows: bookings,
     pagination: {
+      page: currentPage,
+      limit: pageLimit,
       total,
-      page: Number(page),
-      limit: Number(limit),
-      totalPages: Math.ceil(total / limit),
+      totalPages,
     },
   };
 };
