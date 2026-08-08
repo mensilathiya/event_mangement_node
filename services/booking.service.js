@@ -57,11 +57,16 @@ const createBooking = async (data) => {
       throw new AppError("Invalid booking amount", 400);
     }
     const event = await Event.findById(eventId).session(session);
-
+console.log("========== BOOKING EVENT DEBUG ==========");
+console.log("eventId from frontend:", eventId);
+console.log("event found:", event?._id);
+console.log("event isActive:", event?.isActive);
+console.log("event status:", event?.status);
+console.log("========================================");
     if (!event) {
       throw new AppError("Event not found", 404);
     }
-    if (event.status !== "Active") {
+    if (event.isActive !== "Active") {
       throw new AppError(
         "Booking cannot be created because the event is inactive.",
         400
@@ -198,7 +203,7 @@ const getAllBookings = async (query) => {
     fromDate,
     toDate,
   } = query;
-  const activeEvent = await Event.findOne({ status: "Active" });
+  const activeEvent = await Event.findOne({ isActive: "Active" });
 
   if (!activeEvent) {
     return {
