@@ -3,7 +3,7 @@ const TicketType = require("../models/ticketType.model");
 const uploadToCloudinary = require("../utils/cloudinary.util");
 
 // Create Event
-exports.createEvent = async (data, file) => {
+exports.createEvent = async (data, file, adminId) => {
   let imageUrl = "";
   let imagePublicId = "";
 
@@ -30,6 +30,7 @@ exports.createEvent = async (data, file) => {
     videoLinks: data.videoLinks ? JSON.parse(data.videoLinks) : [],
     image: imageUrl,
     imagePublicId: imagePublicId,
+    createdBy: adminId || null,
   });
 
   return event;
@@ -37,7 +38,9 @@ exports.createEvent = async (data, file) => {
 
 // Get Event By Id
 exports.getEventById = async (id) => {
-  const event = await Event.findById(id).lean();
+  const event = await Event.findById(id)
+    .populate("createdBy", "name")
+    .lean();
 
   if (!event) {
     return null;
@@ -72,6 +75,7 @@ exports.getAllEvents = async (query) => {
   const total = await Event.countDocuments(filter);
 
   const events = await Event.find(filter)
+    .populate("createdBy", "name")
     .sort({ createdAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit);
@@ -106,7 +110,7 @@ exports.changeEventStatus = async (id) => {
       new: true,
       runValidators: false,
     }
-  );
+  ).populate("createdBy", "name");
 
   return {
     success: true,

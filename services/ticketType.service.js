@@ -42,12 +42,33 @@ const getAllTicketTypes = async ({
 };
 //update
 const updateTicketType = async (id, data) => {
+  // Whitelist: only these fields are ever writable via update. This
+  // prevents a caller from smuggling in eventId, isDeleted, createdAt,
+  // etc. through the same payload (previously `data` was passed straight
+  // through to findOneAndUpdate with no filtering).
+  const allowedFields = [
+    "ticketName",
+    "allowDayCount",
+    "amount",
+    "allowDates",
+    "availableCount",
+    "description",
+  ];
+
+  const updateData = {};
+
+  allowedFields.forEach((field) => {
+    if (data[field] !== undefined) {
+      updateData[field] = data[field];
+    }
+  });
+
   return await TicketType.findOneAndUpdate(
     {
       _id: id,
       isDeleted: false,
     },
-    data,
+    updateData,
     {
       new: true,
       runValidators: true,

@@ -34,6 +34,10 @@ const getAllEntryReportValidation = [
     .optional()
     .trim(),
 
+  query("search")
+    .optional()
+    .trim(),
+
   query("startDate")
     .optional({ checkFalsy: true })
     .isISO8601()

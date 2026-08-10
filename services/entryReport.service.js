@@ -2,40 +2,78 @@ const BookingTicket = require("../models/bookingTicket.model");
 const Event = require("../models/event.model");
 const ExcelJS = require("exceljs");
 
+// Shared search fields for the toolbar "quick search" — Booking Id, Ticket
+// Id, QR Code, Name, Mobile Number, per the Entry Report spec. Used by both
+// getAllEntryReports and exportEntryReport so search behaves identically
+// in the table and in the exported file.
+const buildSearchOr = (search) => [
+  { bookingNumber: { $regex: search, $options: "i" } },
+  { ticketNumber: { $regex: search, $options: "i" } },
+  { qrImage: { $regex: search, $options: "i" } },
+  { "attendee.name": { $regex: search, $options: "i" } },
+  { "attendee.mobileNumber": { $regex: search, $options: "i" } },
+];
+
+// Applies the end-of-day boundary in UTC explicitly. setHours() would
+// apply the Node process's local timezone, which can shift the boundary
+// by that offset and cause off-by-one-day results depending on where the
+// server runs. startDate/endDate arrive as "YYYY-MM-DD" (date-only ISO),
+// which `new Date(...)` already parses as UTC midnight, so pairing it
+// with setUTCHours keeps both ends of the range in the same timezone.
+const endOfDayUtc = (dateStr) => {
+  const d = new Date(dateStr);
+  d.setUTCHours(23, 59, 59, 999);
+  return d;
+};
+
 // ================= GET ALL ENTRY REPORT =================
 const getAllEntryReports = async (query) => {
   let {
-    eventId,
     page = 1,
     limit = 10,
     bookingId = "",
     ticketId = "",
     mobileNumber = "",
     name = "",
+    search = "",
     startDate,
     endDate,
   } = query;
 
-  // ================= ACTIVE EVENT =================
-
-  if (!eventId) {
-    const activeEvent = await Event.findOne({
-      isActive: true,
-    })
-      .select("_id startDateTime endDateTime")
-      .lean();
-
-    if (!activeEvent) {
-      throw new Error("No active event found.");
-    }
-
-    eventId = activeEvent._id;
-  }
-
   page = parseInt(page, 10) || 1;
   limit = parseInt(limit, 10) || 10;
-
   const skip = (page - 1) * limit;
+
+  // ================= ACTIVE EVENT =================
+  // Always resolved server-side from the currently active event. A client-
+  // supplied eventId is never trusted here, so Entry Report can never
+  // return records from an inactive/unrelated event even if a stale or
+  // forged eventId were sent from the frontend.
+  //
+  // "Active" requires BOTH isActive === true AND endDateTime not yet
+  // passed, checked against the current time on every request. isActive
+  // stays a manually controlled flag (never written here); endDateTime is
+  // what makes this time-accurate without a cron job or scheduler.
+  const now = new Date();
+
+  const activeEvent = await Event.findOne({
+    isActive: true,
+    endDateTime: { $gte: now },
+  })
+    .select("_id name title startDateTime endDateTime")
+    .lean();
+
+  if (!activeEvent) {
+    // No active event: respond gracefully so the UI can show its normal
+    // empty state instead of an error.
+    return {
+      event: null,
+      rows: [],
+      pagination: { page, limit, total: 0, totalPages: 0 },
+    };
+  }
+
+  const eventId = activeEvent._id;
 
   // ================= FILTER =================
 
@@ -72,6 +110,13 @@ const getAllEntryReports = async (query) => {
     };
   }
 
+  // Toolbar quick-search — combines with the specific field filters above
+  // (Mongo ANDs every top-level key, including $or), so Search-button
+  // filters and toolbar search apply together correctly.
+  if (search) {
+    filter.$or = buildSearchOr(search);
+  }
+
   if (startDate || endDate) {
     filter.scannedAt = {};
 
@@ -80,25 +125,14 @@ const getAllEntryReports = async (query) => {
     }
 
     if (endDate) {
-      const lastDate = new Date(endDate);
-      lastDate.setHours(23, 59, 59, 999);
-
-      filter.scannedAt.$lte = lastDate;
+      filter.scannedAt.$lte = endOfDayUtc(endDate);
     }
   }
 
   // ================= FETCH DATA =================
 
-  const [event, tickets, total] = await Promise.all([
-    Event.findById(eventId)
-      .select("name title startDateTime endDateTime")
-      .lean(),
-
+  const [tickets, total] = await Promise.all([
     BookingTicket.find(filter)
-      .populate({
-        path: "eventId",
-        select: "startDateTime endDateTime",
-      })
       .sort({ scannedAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -124,13 +158,13 @@ const getAllEntryReports = async (query) => {
 
     mobileNumber: ticket.attendee?.mobileNumber || "-",
 
-    passDate: ticket.eventId?.startDateTime || null,
+    passDate: activeEvent.startDateTime || null,
 
     scannedAt: ticket.scannedAt || null,
   }));
 
   return {
-    event,
+    event: activeEvent,
 
     rows,
 
@@ -147,30 +181,34 @@ const getAllEntryReports = async (query) => {
 
 const exportEntryReport = async (query, res) => {
   let {
-    eventId,
     bookingId = "",
     ticketId = "",
     name = "",
     mobileNumber = "",
+    search = "",
     startDate,
     endDate,
   } = query;
 
   // ================= ACTIVE EVENT =================
+  // Same server-side enforcement as getAllEntryReports — export always
+  // targets the currently active event, never a client-supplied eventId,
+  // and "active" requires both isActive === true and endDateTime not yet
+  // passed, checked against the current time on every request.
+  const now = new Date();
 
-  if (!eventId) {
-    const activeEvent = await Event.findOne({
-      isActive: true,
-    })
-      .select("_id name title startDateTime endDateTime")
-      .lean();
+  const activeEvent = await Event.findOne({
+    isActive: true,
+    endDateTime: { $gte: now },
+  })
+    .select("_id name title startDateTime endDateTime")
+    .lean();
 
-    if (!activeEvent) {
-      throw new Error("No active event found.");
-    }
-
-    eventId = activeEvent._id;
+  if (!activeEvent) {
+    throw new Error("No active event found.");
   }
+
+  const eventId = activeEvent._id;
 
   // ================= FILTER =================
 
@@ -207,6 +245,10 @@ const exportEntryReport = async (query, res) => {
     };
   }
 
+  if (search) {
+    filter.$or = buildSearchOr(search);
+  }
+
   if (startDate || endDate) {
     filter.scannedAt = {};
 
@@ -215,10 +257,7 @@ const exportEntryReport = async (query, res) => {
     }
 
     if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-
-      filter.scannedAt.$lte = end;
+      filter.scannedAt.$lte = endOfDayUtc(endDate);
     }
   }
 
@@ -230,7 +269,6 @@ const exportEntryReport = async (query, res) => {
       ticketNumber
       qrImage
       scannedAt
-      createdAt
       attendee
     `)
     .sort({ scannedAt: -1 })
@@ -311,6 +349,9 @@ const exportEntryReport = async (query, res) => {
   };
 
   // ================= ROWS =================
+  // Pass Date reflects the active event's own date (same source used by
+  // getAllEntryReports), rather than each ticket's createdAt, so the
+  // exported file and the on-screen table always agree.
 
   rows.forEach((item) => {
     worksheet.addRow({
@@ -322,8 +363,8 @@ const exportEntryReport = async (query, res) => {
 
       mobile: item.attendee?.mobileNumber || "-",
 
-      passDate: item.createdAt
-        ? new Date(item.createdAt).toLocaleDateString("en-GB")
+      passDate: activeEvent.startDateTime
+        ? new Date(activeEvent.startDateTime).toLocaleDateString("en-GB")
         : "-",
 
       scannedAt: item.scannedAt

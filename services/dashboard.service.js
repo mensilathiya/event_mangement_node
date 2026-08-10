@@ -4,18 +4,20 @@ import BookingTicket from "../models/bookingTicket.model.js";
 import TicketType from "../models/ticketType.model.js";
 
 // Get Active Event
+// An event is only considered "active" while isActive === true AND its
+// endDateTime has not yet passed. isActive stays a manually controlled
+// flag (never written here or auto-flipped) — endDateTime is what makes
+// this check time-accurate on every single request, without a cron job,
+// scheduler, or any DB write.
 const getActiveEvent = async () => {
-    const events = await Event.find().lean();
-
-    console.log("All Events:", events);
+    const now = new Date();
 
     const activeEvent = await Event.findOne({
         isActive: true,
+        endDateTime: { $gte: now },
     })
         .sort({ startDateTime: 1 })
         .lean();
-
-    console.log("Active Event:", activeEvent);
 
     return activeEvent;
 };
@@ -39,25 +41,6 @@ const getTodayBooking = async (eventId) => {
 };
 
 
-// Today Pass Entry
-const getTodayPassBooking = async (eventId) => {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-
-    const end = new Date();
-    end.setHours(23, 59, 59, 999);
-
-    return await BookingTicket.countDocuments({
-        eventId,
-        status: "Used",
-        scannedAt: {
-            $gte: start,
-            $lte: end,
-        },
-    });
-};
-
-
 // Total Booking
 const getTotalBooking = async (eventId) => {
     return await Booking.countDocuments({
@@ -66,12 +49,105 @@ const getTotalBooking = async (eventId) => {
 };
 
 
-// Total Pass Entry
-const getTotalPassBooking = async (eventId) => {
-    return await BookingTicket.countDocuments({
+// ================= PASS BOOKING (Today + Total, shared) =================
+// Ticket-Type-wise booked quantity + amount, optionally restricted to a
+// createdAt date range. Used by both getTodayPassBooking (range = today)
+// and getTotalPassBooking (range = undefined = all time), so the exact
+// same correct logic backs both cards instead of duplicating it.
+//
+// Booking.quantity (grouped by ticketTypeId) is the correct "booked"
+// source — BookingTicket.status === "Used" measures scanned/entered
+// attendees, a different metric, and was the original bug in both cards.
+// TicketType.amount is the correct per-unit price (not Booking.amount),
+// per the task's explicit formula: TicketType.amount x quantity.
+//
+// Only 2 queries total regardless of data volume: one $group/$sum
+// aggregation on Booking, then one TicketType.find by the resulting
+// ticketTypeIds — no N+1, and the summing happens in MongoDB, not by
+// pulling every Booking into Node to loop over.
+const getPassBookingBreakdown = async (eventId, dateRange) => {
+    const match = {
         eventId,
-        status: "Used",
-    });
+        isDeleted: false,
+        bookingStatus: "Confirmed",
+    };
+
+    if (dateRange) {
+        match.createdAt = {
+            $gte: dateRange.start,
+            $lte: dateRange.end,
+        };
+    }
+
+    const grouped = await Booking.aggregate([
+        { $match: match },
+        {
+            $group: {
+                _id: "$ticketTypeId",
+                qty: { $sum: "$quantity" },
+            },
+        },
+    ]);
+
+    if (!grouped.length) {
+        return {
+            passBookingCounts: [],
+            totalQty: 0,
+            totalAmount: 0,
+        };
+    }
+
+    const ticketTypeIds = grouped.map((g) => g._id);
+
+    // Using the actual TicketType model (rather than a $lookup with a
+    // hand-written collection name) so the correct collection is always
+    // resolved by Mongoose itself.
+    const ticketTypes = await TicketType.find(
+        { _id: { $in: ticketTypeIds } },
+        { ticketName: 1, amount: 1 }
+    ).lean();
+
+    const ticketTypeMap = new Map(
+        ticketTypes.map((t) => [String(t._id), t])
+    );
+
+    const passBookingCounts = grouped
+        .map((g) => {
+            const ticketType = ticketTypeMap.get(String(g._id));
+            const unitAmount = ticketType?.amount || 0;
+
+            return {
+                ticketTypeId: g._id,
+                ticketName: ticketType?.ticketName || "Unknown Ticket Type",
+                qty: g.qty,
+                amount: unitAmount * g.qty,
+            };
+        })
+        .sort((a, b) => a.ticketName.localeCompare(b.ticketName));
+
+    const totalQty = passBookingCounts.reduce((sum, r) => sum + r.qty, 0);
+    const totalAmount = passBookingCounts.reduce(
+        (sum, r) => sum + r.amount,
+        0
+    );
+
+    return { passBookingCounts, totalQty, totalAmount };
+};
+
+// Today Pass Booking — same breakdown, restricted to bookings created today.
+const getTodayPassBooking = async (eventId) => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+
+    return getPassBookingBreakdown(eventId, { start, end });
+};
+
+// Total Pass Booking — same breakdown, all time (no date range).
+const getTotalPassBooking = async (eventId) => {
+    return getPassBookingBreakdown(eventId);
 };
 
 
@@ -156,8 +232,12 @@ export const getDashboardSummary = async () => {
             activeEvent: null,
             todayBooking: 0,
             todayPassBooking: 0,
+            todayPassAmount: 0,
+            todayPassBookingCounts: [],
             totalBooking: 0,
             totalPassBooking: 0,
+            totalPassAmount: 0,
+            passBookingCounts: [],
             bookingCounts: [],
             totalBookingDetails: [],
         };
@@ -165,9 +245,9 @@ export const getDashboardSummary = async () => {
 
 
     const todayBooking = await getTodayBooking(activeEvent._id);
-    const todayPassBooking = await getTodayPassBooking(activeEvent._id);
+    const todayPassResult = await getTodayPassBooking(activeEvent._id);
     const totalBooking = await getTotalBooking(activeEvent._id);
-    const totalPassBooking = await getTotalPassBooking(activeEvent._id);
+    const totalPassResult = await getTotalPassBooking(activeEvent._id);
     const bookingCounts = await getBookingCounts(activeEvent._id);
     const totalBookingDetails = await getTotalBookingDetails(
         activeEvent._id
@@ -176,9 +256,18 @@ export const getDashboardSummary = async () => {
     return {
         activeEvent,
         todayBooking,
-        todayPassBooking,
+        // Today's booked quantity + amount, ticket-type-wise breakdown.
+        todayPassBooking: todayPassResult.totalQty,
+        todayPassAmount: todayPassResult.totalAmount,
+        todayPassBookingCounts: todayPassResult.passBookingCounts,
         totalBooking,
-        totalPassBooking,
+        // Total quantity of all booked passes across every ticket type
+        // (sum of passBookingCounts[].qty), not a document count.
+        totalPassBooking: totalPassResult.totalQty,
+        // Sum of every ticket type's (qty x TicketType.amount).
+        totalPassAmount: totalPassResult.totalAmount,
+        // Ticket-Type-wise breakdown: [{ ticketTypeId, ticketName, qty, amount }]
+        passBookingCounts: totalPassResult.passBookingCounts,
         bookingCounts,
         totalBookingDetails,
     };

@@ -2,7 +2,9 @@ const eventService = require("../services/event.service");
 //create event
 exports.createEvent = async (req, res, next) => {
   try {
-    const event = await eventService.createEvent(req.body, req.file );
+    // Creator always comes from the authenticated admin (via `protect`),
+    // never from the request body.
+    const event = await eventService.createEvent(req.body, req.file, req.user.id);
 
     return res.status(201).json({
       success: true,

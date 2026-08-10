@@ -17,7 +17,8 @@ const createBooking = async (req, res, next) => {
     next(error);
   }
 };
-// get all bookings
+
+// ================= GET ALL BOOKINGS =================
 const getAllBookings = async (req, res, next) => {
   try {
     const result = await bookingService.getAllBookings(req.query);
@@ -68,7 +69,7 @@ const getBookingById = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-};const exportBookingsController = async (req, res, next) => {
+}; const exportBookingsController = async (req, res, next) => {
   try {
     await bookingService.exportBookings(req.query, res);
   } catch (error) {

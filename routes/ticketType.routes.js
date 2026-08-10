@@ -9,11 +9,14 @@ const {
 } = require("../validators/ticketType.validator");
 const { protect } = require("../middlewares/auth.middleware");
 
+// `protect` now runs first, matching the pattern used in event.routes.js —
+// previously validation ran before auth, which meant an unauthenticated
+// caller could trigger (and see) field-level validation errors.
 router.post(
     "/create",
+    protect,
     createTicketTypeValidation,
     validate,
-    protect,
     ticketTypeController.createTicketType
 );
 // get event 
@@ -22,8 +25,8 @@ router.get("/get-all-ticket-types/:eventId", protect, ticketTypeController.getAl
 // update api
 router.put(
     "/update/:id",
-    updateTicketTypeValidation,
     protect,
+    updateTicketTypeValidation,
     validate,
     ticketTypeController.updateTicketType
 );

@@ -9,7 +9,7 @@ const generateQrCode = async (qrToken) => {
   try {
     return await QRCode.toBuffer(qrToken, {
       type: "png",
-      errorCorrectionLevel: "H",
+      errorCorrectionLevel: "M",
       margin: 2,
       width: 500,
     });

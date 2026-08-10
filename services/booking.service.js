@@ -129,11 +129,7 @@ const createBooking = async (data) => {
 
       // Generate JWT Token
       const qrToken = generateQrToken({
-        bookingId: booking[0]._id,
-        bookingNumber: booking[0].bookingNumber,
         ticketNumber,
-        eventId,
-        ticketTypeId,
       });
 
       // Generate QR Buffer
@@ -184,7 +180,6 @@ const createBooking = async (data) => {
   }
 };
 
-// get all booking
 // ================= GET ALL BOOKINGS =================
 const getAllBookings = async (query) => {
   const {
@@ -197,9 +192,10 @@ const getAllBookings = async (query) => {
     status,
     fromDate,
     toDate,
+    search,
   } = query;
 
-  // Convert pagination values to numbers
+  // ================= CONVERT PAGINATION VALUES =================
   const currentPage = Math.max(Number(page) || 1, 1);
   const pageLimit = Math.max(Number(limit) || 10, 1);
 
@@ -208,7 +204,7 @@ const getAllBookings = async (query) => {
     isActive: true,
   }).select("_id title startDateTime endDateTime");
 
-  // No active event
+  // ================= NO ACTIVE EVENT =================
   if (!activeEvent) {
     return {
       event: null,
@@ -264,6 +260,32 @@ const getAllBookings = async (query) => {
     filter.createdBy = createdBy;
   }
 
+  // ================= GLOBAL SEARCH FILTER =================
+  if (search?.trim()) {
+    const searchValue = search.trim();
+
+    filter.$or = [
+      {
+        bookingNumber: {
+          $regex: searchValue,
+          $options: "i",
+        },
+      },
+      {
+        name: {
+          $regex: searchValue,
+          $options: "i",
+        },
+      },
+      {
+        mobileNumber: {
+          $regex: searchValue,
+          $options: "i",
+        },
+      },
+    ];
+  }
+
   // ================= DATE FILTER =================
   if (fromDate || toDate) {
     filter.createdAt = {};
@@ -295,6 +317,7 @@ const getAllBookings = async (query) => {
   // ================= TOTAL COUNT =================
   const total = await Booking.countDocuments(filter);
 
+  // ================= TOTAL PAGES =================
   const totalPages = Math.ceil(total / pageLimit);
 
   // ================= PAGINATION OFFSET =================
@@ -368,6 +391,7 @@ const exportBookings = async (query, res) => {
     status,
     fromDate,
     toDate,
+    search,
   } = query;
 
   // ================= FIND ACTIVE EVENT =================
@@ -419,6 +443,32 @@ const exportBookings = async (query, res) => {
   // ================= CREATED BY FILTER =================
   if (createdBy) {
     filter.createdBy = createdBy;
+  }
+
+  // ================= GLOBAL SEARCH FILTER =================
+  if (search?.trim()) {
+    const searchValue = search.trim();
+
+    filter.$or = [
+      {
+        bookingNumber: {
+          $regex: searchValue,
+          $options: "i",
+        },
+      },
+      {
+        name: {
+          $regex: searchValue,
+          $options: "i",
+        },
+      },
+      {
+        mobileNumber: {
+          $regex: searchValue,
+          $options: "i",
+        },
+      },
+    ];
   }
 
   // ================= DATE FILTER =================
@@ -652,5 +702,5 @@ module.exports = {
   getAllBookings,
   deleteBooking,
   getBookingById,
-    exportBookings
+  exportBookings
 };

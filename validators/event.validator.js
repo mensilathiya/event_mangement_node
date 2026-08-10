@@ -14,26 +14,51 @@ const createEventValidation = [
 
   body("startDateTime")
     .notEmpty()
-    .withMessage("Start Date & Time is required"),
+    .withMessage("Start Date & Time is required")
+    .isISO8601()
+    .withMessage("Start Date & Time must be a valid date")
+    .custom((value) => {
+      if (new Date(value) < new Date()) {
+        throw new Error("Start Date & Time cannot be in the past");
+      }
+      return true;
+    }),
 
   body("endDateTime")
     .notEmpty()
-    .withMessage("End Date & Time is required"),
+    .withMessage("End Date & Time is required")
+    .isISO8601()
+    .withMessage("End Date & Time must be a valid date")
+    .custom((value, { req }) => {
+      if (
+        req.body.startDateTime &&
+        new Date(value) <= new Date(req.body.startDateTime)
+      ) {
+        throw new Error("End Date & Time must be after Start Date & Time");
+      }
+      return true;
+    }),
 
   body("venueName")
     .trim()
     .notEmpty()
     .withMessage("Venue Name is required"),
 
+  // Latitude/Longitude are required on the Event create form (see
+  // CreateEvent.jsx's REQUIRED_FIELDS) — the backend previously treated
+  // them as optional, which disagreed with the actual business
+  // requirement. Enforced consistently here to match the frontend.
   body("latitude")
-    .optional({ checkFalsy: true })
+    .notEmpty()
+    .withMessage("Latitude is required")
     .isFloat()
-    .withMessage("Invalid latitude"),
+    .withMessage("Latitude must be a valid number"),
 
   body("longitude")
-    .optional({ checkFalsy: true })
+    .notEmpty()
+    .withMessage("Longitude is required")
     .isFloat()
-    .withMessage("Invalid longitude"),
+    .withMessage("Longitude must be a valid number"),
 
   body("address")
     .trim()
@@ -64,14 +89,22 @@ const createEventValidation = [
 ];
 
 // Validation Result
+// Previously this always returned a fixed "Validation Failed" message,
+// leaving the frontend unable to show the user anything specific. The
+// `errors` array (unchanged, still the full list) already carried the
+// real per-field messages — we just weren't surfacing the first one as
+// `message`, which is the field the existing frontend thunks/toasts
+// actually read (`error.response?.data?.message`).
 const validate = (req, res, next) => {
   const errors = validationResult(req);
 
   if (!errors.isEmpty()) {
+    const errorList = errors.array();
+
     return res.status(400).json({
       success: false,
-      message: "Validation Failed",
-      errors: errors.array(),
+      message: errorList[0].msg,
+      errors: errorList,
     });
   }
 

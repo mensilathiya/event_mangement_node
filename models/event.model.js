@@ -58,6 +58,14 @@ const eventSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // Tracks which Admin created this event. Not required so existing
+    // documents created before this field was added continue to work —
+    // they simply resolve to createdBy: null / not populated.
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Admin",
+      default: null,
+    },
   },
   {
     timestamps: true,
