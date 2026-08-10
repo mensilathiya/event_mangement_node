@@ -1,9 +1,15 @@
 const ticketTypeService = require("../services/ticketType.service");
 
 // Create Ticket Type
+// Follows the same pattern as eventService.createEvent(req.body, req.file, req.user.id):
+// the authenticated admin's id is passed as its own argument, never taken
+// from (or spread into) req.body.
 const createTicketType = async (req, res) => {
   try {
-    const ticketType = await ticketTypeService.createTicketType(req.body);
+    const ticketType = await ticketTypeService.createTicketType(
+      req.body,
+      req.user.id
+    );
 
     return res.status(201).json({
       success: true,

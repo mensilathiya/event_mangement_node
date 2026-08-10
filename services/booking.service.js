@@ -27,7 +27,11 @@ const generateBookingNumber = async (session) => {
 };
 
 // post api
-const createBooking = async (data) => {
+// `createdBy` is now accepted as its own argument (set by the controller
+// from req.user.id) rather than being expected inside `data` — mirrors
+// eventService.createEvent(data, file, adminId) and
+// ticketTypeService.createTicketType(data, createdBy).
+const createBooking = async (data, createdBy) => {
   const session = await mongoose.startSession();
 
   try {
@@ -43,7 +47,6 @@ const createBooking = async (data) => {
       email,
       discount,
       remark,
-      createdBy
     } = data;
 
     const bookingQuantity = Number(quantity);
@@ -63,6 +66,12 @@ const createBooking = async (data) => {
     if (!event.isActive) {
       throw new AppError(
         "Booking cannot be created because the event is inactive.",
+        400
+      );
+    }
+    if (new Date(event.endDateTime) < new Date()) {
+      throw new AppError(
+        "Booking cannot be created because the event has expired.",
         400
       );
     }
@@ -200,9 +209,18 @@ const getAllBookings = async (query) => {
   const pageLimit = Math.max(Number(limit) || 10, 1);
 
   // ================= FIND ACTIVE EVENT =================
+  // Same priority as Dashboard: isActive + not yet expired, sorted
+  // ascending by startDateTime so a Running event (startDateTime <= now)
+  // always sorts ahead of any Upcoming event (startDateTime > now), and
+  // the nearest Upcoming event wins when nothing is Running.
+  const now = new Date();
+
   const activeEvent = await Event.findOne({
     isActive: true,
-  }).select("_id title startDateTime endDateTime");
+    endDateTime: { $gte: now },
+  })
+    .sort({ startDateTime: 1 })
+    .select("_id title startDateTime endDateTime");
 
   // ================= NO ACTIVE EVENT =================
   if (!activeEvent) {
@@ -395,9 +413,17 @@ const exportBookings = async (query, res) => {
   } = query;
 
   // ================= FIND ACTIVE EVENT =================
+  // Same priority as Dashboard/getAllBookings: isActive + not yet expired,
+  // sorted ascending by startDateTime so Running is preferred over
+  // Upcoming, and the nearest Upcoming event wins otherwise.
+  const now = new Date();
+
   const activeEvent = await Event.findOne({
     isActive: true,
-  }).select("_id title startDateTime endDateTime");
+    endDateTime: { $gte: now },
+  })
+    .sort({ startDateTime: 1 })
+    .select("_id title startDateTime endDateTime");
 
   if (!activeEvent) {
     throw new AppError("No active event found.", 404);

@@ -54,12 +54,19 @@ const getAllEntryReports = async (query) => {
   // passed, checked against the current time on every request. isActive
   // stays a manually controlled flag (never written here); endDateTime is
   // what makes this time-accurate without a cron job or scheduler.
+  //
+  // Sorted ascending by startDateTime so event selection is deterministic
+  // when multiple events match: a Running event (startDateTime <= now)
+  // always sorts ahead of any Upcoming event (startDateTime > now),
+  // matching the same Running-first, nearest-Upcoming-otherwise priority
+  // Dashboard uses.
   const now = new Date();
 
   const activeEvent = await Event.findOne({
     isActive: true,
     endDateTime: { $gte: now },
   })
+    .sort({ startDateTime: 1 })
     .select("_id name title startDateTime endDateTime")
     .lean();
 
@@ -194,13 +201,15 @@ const exportEntryReport = async (query, res) => {
   // Same server-side enforcement as getAllEntryReports — export always
   // targets the currently active event, never a client-supplied eventId,
   // and "active" requires both isActive === true and endDateTime not yet
-  // passed, checked against the current time on every request.
+  // passed, checked against the current time on every request. Sorted the
+  // same way as getAllEntryReports so export always agrees with the table.
   const now = new Date();
 
   const activeEvent = await Event.findOne({
     isActive: true,
     endDateTime: { $gte: now },
   })
+    .sort({ startDateTime: 1 })
     .select("_id name title startDateTime endDateTime")
     .lean();
 

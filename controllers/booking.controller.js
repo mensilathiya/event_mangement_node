@@ -1,12 +1,13 @@
 const bookingService = require("../services/booking.service");
 
 // Create Booking
+// Follows the same pattern as eventService.createEvent(req.body, req.file, req.user.id)
+// and ticketTypeService.createTicketType(req.body, req.user.id): the
+// authenticated user's id is passed as its own argument, never taken from
+// (or spread into) req.body.
 const createBooking = async (req, res, next) => {
   try {
-    const result = await bookingService.createBooking({
-      ...req.body,
-      createdBy: req.user._id,
-    });
+    const result = await bookingService.createBooking(req.body, req.user.id);
 
     return res.status(201).json({
       success: true,
@@ -39,10 +40,15 @@ const deleteBooking = async (req, res, next) => {
   try {
     const { remark } = req.body;
 
+    // Was req.user._id — functionally identical (Mongoose's `.id` is a
+    // virtual getter for `_id.toString()`), just normalized to `.id` to
+    // match the convention used everywhere else (Event, TicketType,
+    // createBooking above). This was already a separate argument, unlike
+    // createBooking's previous merged-object call.
     const booking = await bookingService.deleteBooking(
       req.params.id,
       remark,
-      req.user._id
+      req.user.id
     );
 
     return res.status(200).json({
@@ -84,4 +90,3 @@ module.exports = {
   getBookingById,
   exportBookingsController,
 };
-

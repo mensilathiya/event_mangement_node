@@ -8,6 +8,12 @@ const ticketTypeSchema = new mongoose.Schema(
       required: true,
     },
 
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Admin",
+      default: null,
+    },
+
     ticketName: {
       type: String,
       required: true,
@@ -23,10 +29,11 @@ const ticketTypeSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
-   allowDates: {
-  type: [Date],
-  default: [],
-},
+
+    allowDates: {
+      type: [Date],
+      default: [],
+    },
 
     availableCount: {
       type: Number,
