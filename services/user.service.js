@@ -17,6 +17,22 @@ const createUser = async (admin, data, file) => {
 
   const email = data.email?.trim() || null;
 
+  // permissions may arrive as a real array (JSON request) or as
+  // repeated multipart/form-data fields (parsed by multer/express as a
+  // single string or an array of strings) — normalize to a clean array
+  // either way. Unrecognized values are dropped rather than rejected so
+  // a stray/legacy value can never silently grant an unintended screen.
+  const ALLOWED_PERMISSIONS = ["Entry Report", "QR Pass"];
+  let permissions = [];
+
+  if (data.permissions !== undefined) {
+    const raw = Array.isArray(data.permissions)
+      ? data.permissions
+      : [data.permissions];
+
+    permissions = raw.filter((p) => ALLOWED_PERMISSIONS.includes(p));
+  }
+
   if (!name || !mobile || !password || !confirmPassword) {
     throw new AppError("All required fields are mandatory", 400);
   }
@@ -57,6 +73,7 @@ const createUser = async (admin, data, file) => {
     password,
     profileImage,
     role: "checker",
+    permissions,
     profileImagePublicId,
     createdBy: admin._id
   });
@@ -113,6 +130,20 @@ const updateUser = async (id, data, file) => {
     status,
   } = data;
 
+  // Same normalization as createUser — only touch permissions when the
+  // request actually sent the field, so an update that doesn't mention
+  // permissions never wipes out the user's existing assignments.
+  const ALLOWED_PERMISSIONS = ["Entry Report", "QR Pass"];
+  let permissions;
+
+  if (data.permissions !== undefined) {
+    const raw = Array.isArray(data.permissions)
+      ? data.permissions
+      : [data.permissions];
+
+    permissions = raw.filter((p) => ALLOWED_PERMISSIONS.includes(p));
+  }
+
   const user = await User.findById(id);
 
   if (!user) {
@@ -168,6 +199,7 @@ const updateUser = async (id, data, file) => {
       profileImage,
       profileImagePublicId,
       ...(password && { password }),
+      ...(permissions !== undefined && { permissions }),
     },
     {
       new: true,

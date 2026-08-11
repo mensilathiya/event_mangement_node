@@ -4,6 +4,7 @@ const router = express.Router();
 
 const entryReportController = require("../controllers/entryReport.controller");
 const { protect } = require("../middlewares/auth.middleware");
+const authorize = require("../middlewares/authorize.middleware");
 const validate = require("../middlewares/validate.middleware");
 
 const {
@@ -11,9 +12,12 @@ const {
   exportEntryReportValidation,
 } = require("../validators/entryReport.validation");
 // get all entery report
+// Admin always has access; a Checker additionally needs the
+// "Entry Report" permission on their User document.
 router.get(
   "/get-all-entry-report",
   protect,
+  authorize("admin", "checker", { permission: "Entry Report" }),
   getAllEntryReportValidation,
   validate,
   entryReportController.getAllEntryReports
@@ -22,6 +26,7 @@ router.get(
 router.get(
   "/export",
   protect,
+  authorize("admin", "checker", { permission: "Entry Report" }),
   exportEntryReportValidation,
   validate,
   entryReportController.exportEntryReport

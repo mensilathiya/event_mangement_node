@@ -26,8 +26,23 @@ const endOfDayUtc = (dateStr) => {
   return d;
 };
 
+// Restricts a query filter to only the records the authenticated user is
+// allowed to see. Admin (role "admin", set from the previous auth step)
+// is left completely unrestricted — existing behavior. Any other role
+// (currently only "checker") only ever sees tickets where
+// BookingTicket.scannedBy matches THEIR OWN authenticated _id — sourced
+// from currentUser (req.user, resolved server-side by the protect
+// middleware), never from any client-supplied query parameter. Shared by
+// both getAllEntryReports and exportEntryReport so the table and the
+// export can never diverge.
+const applyScannerScope = (filter, currentUser) => {
+  if (currentUser && currentUser.role !== "admin") {
+    filter.scannedBy = currentUser._id;
+  }
+};
+
 // ================= GET ALL ENTRY REPORT =================
-const getAllEntryReports = async (query) => {
+const getAllEntryReports = async (query, currentUser) => {
   let {
     page = 1,
     limit = 10,
@@ -88,6 +103,11 @@ const getAllEntryReports = async (query) => {
     eventId,
     status: "Used",
   };
+
+  // Checker-scoping — added BEFORE the optional filters below so it
+  // combines with them via a normal AND, exactly like every other base
+  // filter field already does. Admin is unaffected (no-op for admin).
+  applyScannerScope(filter, currentUser);
 
   if (bookingId) {
     filter.bookingNumber = {
@@ -186,7 +206,7 @@ const getAllEntryReports = async (query) => {
 
 // ================= EXPORT ENTRY REPORT =================
 
-const exportEntryReport = async (query, res) => {
+const exportEntryReport = async (query, res, currentUser) => {
   let {
     bookingId = "",
     ticketId = "",
@@ -225,6 +245,11 @@ const exportEntryReport = async (query, res) => {
     eventId,
     status: "Used",
   };
+
+  // Same Checker-scoping as getAllEntryReports — export must never be a
+  // way for a Checker to bypass the same-user restriction the table
+  // enforces.
+  applyScannerScope(filter, currentUser);
 
   if (bookingId) {
     filter.bookingNumber = {

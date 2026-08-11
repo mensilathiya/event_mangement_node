@@ -88,6 +88,97 @@ const createEventValidation = [
     }),
 ];
 
+// Update Event Validation
+// Mirrors createEventValidation's rules field-for-field, but every field
+// is `.optional()` since an edit may only send a subset of fields.
+// NOTE: the "endDateTime must be after startDateTime" check below only
+// fires when BOTH fields are present in this same request. If only one
+// of the two is sent, event.service.js's updateEvent merges it against
+// the event's existing stored value and re-checks the ordering there,
+// since only the service has access to the current DB record.
+const updateEventValidation = [
+  body("title")
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage("Title cannot be empty"),
+
+  body("description")
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage("Description cannot be empty"),
+
+  body("startDateTime")
+    .optional()
+    .isISO8601()
+    .withMessage("Start Date & Time must be a valid date")
+    .custom((value) => {
+      if (new Date(value) < new Date()) {
+        throw new Error("Start Date & Time cannot be in the past");
+      }
+      return true;
+    }),
+
+  body("endDateTime")
+    .optional()
+    .isISO8601()
+    .withMessage("End Date & Time must be a valid date")
+    .custom((value, { req }) => {
+      if (
+        req.body.startDateTime &&
+        new Date(value) <= new Date(req.body.startDateTime)
+      ) {
+        throw new Error("End Date & Time must be after Start Date & Time");
+      }
+      return true;
+    }),
+
+  body("venueName")
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage("Venue Name cannot be empty"),
+
+  body("latitude")
+    .optional()
+    .isFloat()
+    .withMessage("Latitude must be a valid number"),
+
+  body("longitude")
+    .optional()
+    .isFloat()
+    .withMessage("Longitude must be a valid number"),
+
+  body("address")
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage("Address cannot be empty"),
+
+  body("termsConditions")
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage("Terms & Conditions cannot be empty"),
+
+  body("videoLinks")
+    .optional({ checkFalsy: true })
+    .custom((value) => {
+      try {
+        const links = JSON.parse(value);
+
+        if (!Array.isArray(links)) {
+          throw new Error();
+        }
+
+        return true;
+      } catch {
+        throw new Error("Video Links must be a valid JSON array");
+      }
+    }),
+];
+
 // Validation Result
 // Previously this always returned a fixed "Validation Failed" message,
 // leaving the frontend unable to show the user anything specific. The
@@ -113,5 +204,6 @@ const validate = (req, res, next) => {
 
 module.exports = {
   createEventValidation,
+  updateEventValidation,
   validate,
 };

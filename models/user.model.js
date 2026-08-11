@@ -73,6 +73,19 @@ const userSchema = new Schema(
       default: 'active',
     },
 
+    // Per-user permissions for Checker accounts. Kept directly on the
+    // User document (no separate Role/Permission collection) since every
+    // Checker-capable feature today is exactly these two screens, and
+    // each checker needs their own subset — not a shared role-level list.
+    permissions: {
+      type: [String],
+      enum: {
+        values: ['Entry Report', 'QR Pass'],
+        message: 'Permission must be either "Entry Report" or "QR Pass"',
+      },
+      default: [],
+    },
+
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: 'Admin', // reference to the Admin model used for JWT authentication

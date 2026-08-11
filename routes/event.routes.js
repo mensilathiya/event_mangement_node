@@ -8,6 +8,7 @@ const eventController = require("../controllers/event.controller");
 
 const {
   createEventValidation,
+  updateEventValidation,
   validate,
 } = require("../validators/event.validator");
 
@@ -33,6 +34,23 @@ router.get(
   "/:id",
   protect,
   eventController.getEventById
+);
+
+// Update Event
+router.put(
+  "/:id",
+  protect,
+  upload.single("image"),
+  updateEventValidation,
+  validate,
+  eventController.updateEvent
+);
+
+// Delete Event
+router.delete(
+  "/:id",
+  protect,
+  eventController.deleteEvent
 );
 
 // Change Event Status

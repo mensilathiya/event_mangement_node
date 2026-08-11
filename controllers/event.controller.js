@@ -46,6 +46,37 @@ exports.getAllEvents = async (req, res, next) => {
     next(error);
   }
 };
+// Update Event
+exports.updateEvent = async (req, res, next) => {
+  try {
+    // Same convention as createEvent: adminId comes from the
+    // authenticated admin (via `protect`), never from the request body.
+    const event = await eventService.updateEvent(
+      req.params.id,
+      req.body,
+      req.file,
+      req.user.id
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Event updated successfully.",
+      data: event,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+// Delete Event
+exports.deleteEvent = async (req, res, next) => {
+  try {
+    const result = await eventService.deleteEvent(req.params.id);
+
+    return res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+};
 // Change Event Status
 exports.changeEventStatus = async (req, res, next) => {
   try {

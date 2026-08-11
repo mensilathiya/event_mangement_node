@@ -36,6 +36,31 @@ const createUserValidation = [
       }
       return true;
     }),
+
+  // Optional on create — a Checker can be created with no permissions
+  // yet and have them assigned later via update. Accepts either a real
+  // array (JSON) or repeated form fields (multipart), matching how the
+  // rest of createUserValidation already tolerates both.
+  body("permissions")
+    .optional()
+    .custom((value) => {
+      const values = Array.isArray(value) ? value : [value];
+      const allowed = ["Entry Report", "QR Pass"];
+
+      // Empty-string entries are how the frontend explicitly signals
+      // "clear all permissions" over multipart/form-data (an actually
+      // empty field would otherwise not be sent at all) — they're a
+      // valid "no permission" placeholder, not an invalid value.
+      const invalid = values.filter((v) => v !== "" && !allowed.includes(v));
+
+      if (invalid.length > 0) {
+        throw new Error(
+          `Invalid permission(s): ${invalid.join(", ")}. Allowed values are "Entry Report" and "QR Pass"`
+        );
+      }
+
+      return true;
+    }),
 ];
 
 // Update User Validation
@@ -84,6 +109,27 @@ const updateUserValidation = [
     .optional()
     .isIn(["active", "inactive"])
     .withMessage('Status must be either "active" or "inactive"'),
+
+  body("permissions")
+    .optional()
+    .custom((value) => {
+      const values = Array.isArray(value) ? value : [value];
+      const allowed = ["Entry Report", "QR Pass"];
+
+      // Empty-string entries are how the frontend explicitly signals
+      // "clear all permissions" over multipart/form-data (an actually
+      // empty field would otherwise not be sent at all) — they're a
+      // valid "no permission" placeholder, not an invalid value.
+      const invalid = values.filter((v) => v !== "" && !allowed.includes(v));
+
+      if (invalid.length > 0) {
+        throw new Error(
+          `Invalid permission(s): ${invalid.join(", ")}. Allowed values are "Entry Report" and "QR Pass"`
+        );
+      }
+
+      return true;
+    }),
 ];
 
 // Validation Result
