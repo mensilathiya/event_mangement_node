@@ -6,6 +6,7 @@ const { protect } = require("../middlewares/auth.middleware");
 const upload = require("../middlewares/upload.middleware");
 const {
   createUserValidation,
+  updateUserValidation,
   validate,
 } = require("../validators/user.validator");
 
@@ -29,6 +30,8 @@ router.put(
   "/:id",
   protect,
   upload.single("profileImage"),
+  updateUserValidation,
+  validate,
   userController.updateUser
 );
 // delete users

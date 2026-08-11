@@ -4,8 +4,6 @@ const uploadToCloudinary = require("../utils/cloudinary.util");
 const deleteFromCloudinary = require("../utils/deleteCloudinaryFile");
 // create user
 const createUser = async (admin, data, file) => {
-console.log("BODY:", data);
-console.log("EMAIL:", JSON.stringify(data.email));
   if (!admin || admin.role !== "admin") {
     throw new AppError("Only Admin can create users", 403);
   }
