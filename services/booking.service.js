@@ -111,6 +111,21 @@ const createBooking = async (data, createdBy) => {
 
     const bookingNumber = await generateBookingNumber(session);
 
+    // ================= PASS DATE =================
+    // TicketType's date field is `allowDates` — an array, not a single
+    // `allowDate`. Since CreateBookingModal has no date-selection UI (and
+    // isn't meant to gain one), there's no way for the booking itself to
+    // indicate which of possibly several allowDates this ticket is for.
+    // The first date in the array is used as the deterministic Pass Date
+    // for every ticket this booking generates. If a ticket type only ever
+    // has one allowDate in practice, this is exactly that date; if it can
+    // genuinely have several, this is a real business-rule assumption —
+    // see the accompanying summary.
+    const passDate =
+      Array.isArray(ticketType.allowDates) && ticketType.allowDates.length > 0
+        ? ticketType.allowDates[0]
+        : null;
+
     const booking = await Booking.create(
       [
         {
@@ -160,6 +175,7 @@ const createBooking = async (data, createdBy) => {
         qrImage: qrUpload.url,
         qrImagePublicId: qrUpload.public_id,
         status: "Active",
+        passDate,
       });
     }
 

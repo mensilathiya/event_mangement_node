@@ -62,6 +62,16 @@ const bookingTicketSchema = new mongoose.Schema(
       default: null,
     },
 
+    // The date this specific ticket is valid for entry — copied from the
+    // selected TicketType's allowDates at booking-creation time (see
+    // booking.service.js's createBooking). Distinct from scannedAt (when
+    // the ticket was actually scanned at the gate) and from createdAt
+    // (when the booking record was made).
+    passDate: {
+      type: Date,
+      default: null,
+    },
+
     scannedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
