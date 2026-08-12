@@ -22,16 +22,7 @@ const createUser = async (admin, data, file) => {
   // single string or an array of strings) — normalize to a clean array
   // either way. Unrecognized values are dropped rather than rejected so
   // a stray/legacy value can never silently grant an unintended screen.
-  const ALLOWED_PERMISSIONS = ["Entry Report", "QR Pass"];
-  let permissions = [];
-
-  if (data.permissions !== undefined) {
-    const raw = Array.isArray(data.permissions)
-      ? data.permissions
-      : [data.permissions];
-
-    permissions = raw.filter((p) => ALLOWED_PERMISSIONS.includes(p));
-  }
+  const permissions = ["QR Pass", "Entry Report"];
 
   if (!name || !mobile || !password || !confirmPassword) {
     throw new AppError("All required fields are mandatory", 400);
@@ -41,14 +32,14 @@ const createUser = async (admin, data, file) => {
     throw new AppError("Password and Confirm Password do not match", 400);
   }
 
-  const mobileExist = await User.findOne({ mobile });
+  const mobileExist = await User.findOne({ mobile, status: "active" });
 
   if (mobileExist) {
     throw new AppError("Mobile already exists", 409);
   }
 
   if (email) {
-    const emailExist = await User.findOne({ email });
+    const emailExist = await User.findOne({ email, status: "active" });
 
     if (emailExist) {
       throw new AppError("Email already exists", 409);
@@ -130,20 +121,6 @@ const updateUser = async (id, data, file) => {
     status,
   } = data;
 
-  // Same normalization as createUser — only touch permissions when the
-  // request actually sent the field, so an update that doesn't mention
-  // permissions never wipes out the user's existing assignments.
-  const ALLOWED_PERMISSIONS = ["Entry Report", "QR Pass"];
-  let permissions;
-
-  if (data.permissions !== undefined) {
-    const raw = Array.isArray(data.permissions)
-      ? data.permissions
-      : [data.permissions];
-
-    permissions = raw.filter((p) => ALLOWED_PERMISSIONS.includes(p));
-  }
-
   const user = await User.findById(id);
 
   if (!user) {
@@ -173,6 +150,7 @@ const updateUser = async (id, data, file) => {
       throw new AppError("Email already exists", 409);
     }
   }
+
   let profileImage = user.profileImage;
   let profileImagePublicId = user.profileImagePublicId;
 
@@ -189,6 +167,7 @@ const updateUser = async (id, data, file) => {
     profileImage = uploadedImage.url;
     profileImagePublicId = uploadedImage.public_id;
   }
+
   const updatedUser = await User.findByIdAndUpdate(
     id,
     {
@@ -199,7 +178,9 @@ const updateUser = async (id, data, file) => {
       profileImage,
       profileImagePublicId,
       ...(password && { password }),
-      ...(permissions !== undefined && { permissions }),
+
+      // Every Checker always has the same permissions
+      permissions: ["QR Pass", "Entry Report"],
     },
     {
       new: true,
@@ -218,13 +199,9 @@ const deleteUser = async (id) => {
   }
   if (user.profileImagePublicId) {
     await deleteFromCloudinary(user.profileImagePublicId);
-
-    user.profileImage = "";
-    user.profileImagePublicId = "";
   }
-  user.status = "inactive";
 
-  await user.save();
+  await User.findByIdAndDelete(id);
 
   return user;
 };

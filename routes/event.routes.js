@@ -38,7 +38,7 @@ router.get(
 
 // Update Event
 router.put(
-  "/:id",
+  "/:id/update",
   protect,
   upload.single("image"),
   updateEventValidation,
@@ -48,7 +48,7 @@ router.put(
 
 // Delete Event
 router.delete(
-  "/:id",
+  "/:id/delete",
   protect,
   eventController.deleteEvent
 );

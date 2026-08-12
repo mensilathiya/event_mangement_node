@@ -1,441 +1,211 @@
-const BookingTicket = require("../models/bookingTicket.model");
+const mongoose = require("mongoose");
 const Event = require("../models/event.model");
-const ExcelJS = require("exceljs");
+const TicketType = require("../models/ticketType.model");
+const uploadToCloudinary = require("../utils/cloudinary.util");
 
-// Shared search fields for the toolbar "quick search" — Booking Id, Ticket
-// Id, QR Code, Name, Mobile Number, per the Entry Report spec. Used by both
-// getAllEntryReports and exportEntryReport so search behaves identically
-// in the table and in the exported file.
-const buildSearchOr = (search) => [
-  { bookingNumber: { $regex: search, $options: "i" } },
-  { ticketNumber: { $regex: search, $options: "i" } },
-  { qrImage: { $regex: search, $options: "i" } },
-  { "attendee.name": { $regex: search, $options: "i" } },
-  { "attendee.mobileNumber": { $regex: search, $options: "i" } },
-];
+// Create Event
+exports.createEvent = async (data, file, adminId) => {
+  let imageUrl = "";
+  let imagePublicId = "";
 
-// Applies the end-of-day boundary in UTC explicitly. setHours() would
-// apply the Node process's local timezone, which can shift the boundary
-// by that offset and cause off-by-one-day results depending on where the
-// server runs. startDate/endDate arrive as "YYYY-MM-DD" (date-only ISO),
-// which `new Date(...)` already parses as UTC midnight, so pairing it
-// with setUTCHours keeps both ends of the range in the same timezone.
-const endOfDayUtc = (dateStr) => {
-  const d = new Date(dateStr);
-  d.setUTCHours(23, 59, 59, 999);
-  return d;
+  if (file) {
+    const uploadedImage = await uploadToCloudinary(
+      file.buffer,
+      "event-management/events"
+    );
+
+    imageUrl = uploadedImage.url;
+    imagePublicId = uploadedImage.public_id;
+  }
+
+  const event = await Event.create({
+    title: data.title,
+    description: data.description,
+    startDateTime: data.startDateTime,
+    endDateTime: data.endDateTime,
+    venueName: data.venueName,
+    latitude: data.latitude,
+    longitude: data.longitude,
+    address: data.address,
+    termsConditions: data.termsConditions,
+    videoLinks: data.videoLinks ? JSON.parse(data.videoLinks) : [],
+    image: imageUrl,
+    imagePublicId: imagePublicId,
+    createdBy: adminId || null,
+    // Written explicitly (not left to the schema default alone) so every
+    // new event is guaranteed to have this field stored in MongoDB from
+    // the moment it's created, regardless of the schema default.
+    isDeleted: false,
+  });
+
+  return event;
 };
 
-// ================= GET ALL ENTRY REPORT =================
-const getAllEntryReports = async (query) => {
-  let {
-    page = 1,
-    limit = 10,
-    bookingId = "",
-    ticketId = "",
-    mobileNumber = "",
-    name = "",
-    search = "",
-    startDate,
-    endDate,
-  } = query;
-
-  page = parseInt(page, 10) || 1;
-  limit = parseInt(limit, 10) || 10;
-  const skip = (page - 1) * limit;
-
-  // ================= ACTIVE EVENT =================
-  // Always resolved server-side from the currently active event. A client-
-  // supplied eventId is never trusted here, so Entry Report can never
-  // return records from an inactive/unrelated event even if a stale or
-  // forged eventId were sent from the frontend.
-  //
-  // "Active" requires BOTH isActive === true AND endDateTime not yet
-  // passed, checked against the current time on every request. isActive
-  // stays a manually controlled flag (never written here); endDateTime is
-  // what makes this time-accurate without a cron job or scheduler.
-  //
-  // Sorted ascending by startDateTime so event selection is deterministic
-  // when multiple events match: a Running event (startDateTime <= now)
-  // always sorts ahead of any Upcoming event (startDateTime > now),
-  // matching the same Running-first, nearest-Upcoming-otherwise priority
-  // Dashboard uses.
-  const now = new Date();
-
-  const activeEvent = await Event.findOne({
-    isActive: true,
-    endDateTime: { $gte: now },
-  })
-    .sort({ startDateTime: 1 })
-    .select("_id name title startDateTime endDateTime")
+// Get Event By Id
+exports.getEventById = async (id) => {
+  const event = await Event.findOne({ _id: id, isDeleted: { $ne: true } })
+    .populate("createdBy", "name")
     .lean();
 
-  if (!activeEvent) {
-    // No active event: respond gracefully so the UI can show its normal
-    // empty state instead of an error.
-    return {
-      event: null,
-      rows: [],
-      pagination: { page, limit, total: 0, totalPages: 0 },
-    };
+  if (!event) {
+    return null;
   }
 
-  const eventId = activeEvent._id;
-
-  // ================= PASS DATE FILTER =================
-  // The date-range filter must apply to Pass Date, never to `scannedAt`
-  // (when a ticket was scanned at entry) or `createdAt`. Pass Date, as
-  // computed below in rows.map() and already consumed by the frontend
-  // table via row.passDate, is derived from the resolved active event's
-  // own startDateTime — BookingTicket has no per-ticket pass-date field
-  // (nothing date-related beyond scannedAt is set at ticket-generation
-  // time in booking.service.js, and nothing else is stored on the ticket
-  // document). Since every row in a single response already belongs to
-  // this one resolved event, Pass Date is identical for the whole result
-  // set — so "filtering by Pass Date" here means: does the event's own
-  // Pass Date fall inside the requested [startDate, endDate] window? If
-  // not, the entire result set is empty (a normal empty response, not an
-  // error — see below); if so, no per-document restriction is needed
-  // since it already applies uniformly to every row.
-  if (startDate || endDate) {
-    const passDateValue = activeEvent.startDateTime
-      ? new Date(activeEvent.startDateTime)
-      : null;
-
-    const outOfRange =
-      !passDateValue ||
-      (startDate && passDateValue < new Date(startDate)) ||
-      (endDate && passDateValue > endOfDayUtc(endDate));
-
-    if (outOfRange) {
-      return {
-        event: activeEvent,
-        rows: [],
-        pagination: { page, limit, total: 0, totalPages: 0 },
-      };
-    }
-  }
-
-  // ================= FILTER =================
-
-  const filter = {
-    eventId,
-    status: "Used",
-  };
-
-  if (bookingId) {
-    filter.bookingNumber = {
-      $regex: bookingId,
-      $options: "i",
-    };
-  }
-
-  if (ticketId) {
-    filter.ticketNumber = {
-      $regex: ticketId,
-      $options: "i",
-    };
-  }
-
-  if (mobileNumber) {
-    filter["attendee.mobileNumber"] = {
-      $regex: mobileNumber,
-      $options: "i",
-    };
-  }
-
-  if (name) {
-    filter["attendee.name"] = {
-      $regex: name,
-      $options: "i",
-    };
-  }
-
-  // Toolbar quick-search — combines with the specific field filters above
-  // (Mongo ANDs every top-level key, including $or), so Search-button
-  // filters and toolbar search apply together correctly.
-  if (search) {
-    filter.$or = buildSearchOr(search);
-  }
-
-  // ================= FETCH DATA =================
-
-  const [tickets, total] = await Promise.all([
-    BookingTicket.find(filter)
-      .sort({ scannedAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
-
-    BookingTicket.countDocuments(filter),
-  ]);
-
-  // ================= FORMAT ROWS =================
-
-  const rows = tickets.map((ticket) => ({
-    _id: ticket._id,
-
-    profileImage: ticket.attendee?.profileImage || "",
-
-    bookingId: ticket.bookingNumber,
-
-    ticketId: ticket.ticketNumber,
-
-    qrImage: ticket.qrImage || "",
-
-    name: ticket.attendee?.name || "-",
-
-    mobileNumber: ticket.attendee?.mobileNumber || "-",
-
-    passDate: activeEvent.startDateTime || null,
-
-    scannedAt: ticket.scannedAt || null,
-  }));
+  const tickets = await TicketType.find(
+    { eventId: id, isDeleted: false },
+    { ticketName: 1, _id: 0 }
+  );
 
   return {
-    event: activeEvent,
+    ...event,
+    ticketTypes: tickets.map((ticket) => ticket.ticketName),
+  };
+};
 
-    rows,
+// Get All Events
+exports.getAllEvents = async (query) => {
+  const page = parseInt(query.page) || 1;
+  const limit = parseInt(query.limit) || 10;
+  const search = query.search || "";
 
+  const filter = { isDeleted: { $ne: true } };
+
+  if (search) {
+    filter.title = {
+      $regex: search,
+      $options: "i",
+    };
+  }
+
+  const total = await Event.countDocuments(filter);
+
+  const events = await Event.find(filter)
+    .populate("createdBy", "name")
+    .sort({ createdAt: -1 })
+    .skip((page - 1) * limit)
+    .limit(limit);
+
+  return {
+    success: true,
+    message: "Events fetched successfully.",
+    data: events,
     pagination: {
+      total,
       page,
       limit,
-      total,
       totalPages: Math.ceil(total / limit),
     },
   };
 };
 
-// ================= EXPORT ENTRY REPORT =================
-
-const exportEntryReport = async (query, res) => {
-  let {
-    bookingId = "",
-    ticketId = "",
-    name = "",
-    mobileNumber = "",
-    search = "",
-    startDate,
-    endDate,
-  } = query;
-
-  // ================= ACTIVE EVENT =================
-  // Same server-side enforcement as getAllEntryReports — export always
-  // targets the currently active event, never a client-supplied eventId,
-  // and "active" requires both isActive === true and endDateTime not yet
-  // passed, checked against the current time on every request. Sorted the
-  // same way as getAllEntryReports so export always agrees with the table.
-  const now = new Date();
-
-  const activeEvent = await Event.findOne({
-    isActive: true,
-    endDateTime: { $gte: now },
-  })
-    .sort({ startDateTime: 1 })
-    .select("_id name title startDateTime endDateTime")
-    .lean();
-
-  if (!activeEvent) {
-    throw new Error("No active event found.");
+// Update Event
+exports.updateEvent = async (id, data, file) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new Error("Invalid Event ID");
   }
 
-  const eventId = activeEvent._id;
+  const event = await Event.findOne({ _id: id, isDeleted: { $ne: true } });
 
-  // ================= PASS DATE FILTER =================
-  // Same reasoning and same field as getAllEntryReports above: Pass Date
-  // is the resolved active event's own startDateTime, not `scannedAt`.
-  // An out-of-range date range is NOT an error condition here — it must
-  // still produce a valid Excel file, just with zero data rows, so the
-  // export always agrees with what the on-screen table would show for
-  // the same filters (an empty table, not an error state).
-  let passDateOutOfRange = false;
-
-  if (startDate || endDate) {
-    const passDateValue = activeEvent.startDateTime
-      ? new Date(activeEvent.startDateTime)
-      : null;
-
-    passDateOutOfRange =
-      !passDateValue ||
-      (startDate && passDateValue < new Date(startDate)) ||
-      (endDate && passDateValue > endOfDayUtc(endDate));
+  if (!event) {
+    throw new Error("Event not found");
   }
 
-  // ================= FILTER =================
+  let imageUrl = event.image;
+  let imagePublicId = event.imagePublicId;
 
-  const filter = {
-    eventId,
-    status: "Used",
-  };
+  if (file) {
+    const uploadedImage = await uploadToCloudinary(
+      file.buffer,
+      "event-management/events"
+    );
 
-  if (bookingId) {
-    filter.bookingNumber = {
-      $regex: bookingId,
-      $options: "i",
-    };
+    imageUrl = uploadedImage.url;
+    imagePublicId = uploadedImage.public_id;
   }
 
-  if (ticketId) {
-    filter.ticketNumber = {
-      $regex: ticketId,
-      $options: "i",
-    };
-  }
-
-  if (name) {
-    filter["attendee.name"] = {
-      $regex: name,
-      $options: "i",
-    };
-  }
-
-  if (mobileNumber) {
-    filter["attendee.mobileNumber"] = {
-      $regex: mobileNumber,
-      $options: "i",
-    };
-  }
-
-  if (search) {
-    filter.$or = buildSearchOr(search);
-  }
-
-  // ================= DATA =================
-
-  const rows = passDateOutOfRange
-    ? []
-    : await BookingTicket.find(filter)
-        .select(`
-          bookingNumber
-          ticketNumber
-          qrImage
-          scannedAt
-          attendee
-        `)
-        .sort({ scannedAt: -1 })
-        .lean();
-
-  // ================= WORKBOOK =================
-
-  const workbook = new ExcelJS.Workbook();
-
-  workbook.creator = "Event Management CRM";
-  workbook.created = new Date();
-
-  const worksheet = workbook.addWorksheet("Entry Report");
-
-  worksheet.columns = [
+  // isActive is intentionally left untouched here — it is only ever
+  // changed through changeEventStatus. This guarantees that editing an
+  // event that is already expired/inactive can never flip it back to
+  // Active as a side effect of the update.
+  const updatedEvent = await Event.findByIdAndUpdate(
+    id,
     {
-      header: "Booking Id",
-      key: "bookingId",
-      width: 22,
+      title: data.title,
+      description: data.description,
+      startDateTime: data.startDateTime,
+      endDateTime: data.endDateTime,
+      venueName: data.venueName,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      address: data.address,
+      termsConditions: data.termsConditions,
+      videoLinks: data.videoLinks
+        ? JSON.parse(data.videoLinks)
+        : event.videoLinks,
+      image: imageUrl,
+      imagePublicId: imagePublicId,
     },
     {
-      header: "Ticket Id",
-      key: "ticketId",
-      width: 22,
-    },
-    {
-      header: "Name",
-      key: "name",
-      width: 25,
-    },
-    {
-      header: "Mobile Number",
-      key: "mobile",
-      width: 18,
-    },
-    {
-      header: "Pass Date",
-      key: "passDate",
-      width: 22,
-    },
-    {
-      header: "Scanned At",
-      key: "scannedAt",
-      width: 24,
-    },
-    {
-      header: "QR Image",
-      key: "qrImage",
-      width: 45,
-    },
-    {
-      header: "Profile Image",
-      key: "profileImage",
-      width: 45,
-    },
-  ];
+      new: true,
+      runValidators: true,
+    }
+  ).populate("createdBy", "name");
 
-  // ================= HEADER STYLE =================
-
-  worksheet.getRow(1).font = {
-    bold: true,
-    color: {
-      argb: "FFFFFFFF",
-    },
-  };
-
-  worksheet.getRow(1).fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: {
-      argb: "1F4E78",
-    },
-  };
-
-  worksheet.getRow(1).alignment = {
-    vertical: "middle",
-    horizontal: "center",
-  };
-
-  // ================= ROWS =================
-  // Pass Date reflects the active event's own date (same source used by
-  // getAllEntryReports), rather than each ticket's createdAt, so the
-  // exported file and the on-screen table always agree.
-
-  rows.forEach((item) => {
-    worksheet.addRow({
-      bookingId: item.bookingNumber,
-
-      ticketId: item.ticketNumber,
-
-      name: item.attendee?.name || "-",
-
-      mobile: item.attendee?.mobileNumber || "-",
-
-      passDate: activeEvent.startDateTime
-        ? new Date(activeEvent.startDateTime).toLocaleDateString("en-GB")
-        : "-",
-
-      scannedAt: item.scannedAt
-        ? new Date(item.scannedAt).toLocaleString("en-GB")
-        : "-",
-
-      qrImage: item.qrImage || "-",
-
-      profileImage: item.attendee?.profileImage || "-",
-    });
-  });
-
-  // ================= DOWNLOAD =================
-
-  res.setHeader(
-    "Content-Type",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-  );
-
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename=EntryReport_${Date.now()}.xlsx`
-  );
-
-  await workbook.xlsx.write(res);
-
-  res.end();
+  return updatedEvent;
 };
 
-module.exports = {
-  getAllEntryReports,
-  exportEntryReport,
+// Delete Event
+exports.deleteEvent = async (id, adminId) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new Error("Invalid Event ID");
+  }
+
+  const event = await Event.findOne({ _id: id, isDeleted: { $ne: true } });
+
+  if (!event) {
+    throw new Error("Event not found");
+  }
+
+  // Soft-delete only — the event is hidden from getAllEvents/getEventById/
+  // changeEventStatus from this point on, but the document itself, and
+  // every Booking / BookingTicket / attendee record that references this
+  // eventId, is left completely untouched. No cascading, no dependency
+  // block: existing bookings/reports keep working exactly as before,
+  // they're just now tied to a soft-deleted event.
+  await Event.findByIdAndUpdate(id, {
+    isDeleted: true,
+    deletedAt: new Date(),
+    deletedBy: adminId || null,
+  });
+
+  return {
+    success: true,
+    message: "Event deleted successfully.",
+  };
+};
+
+// Change Event Status
+exports.changeEventStatus = async (id) => {
+  const event = await Event.findOne({ _id: id, isDeleted: { $ne: true } });
+
+  if (!event) {
+    throw new Error("Event not found");
+  }
+
+  const updatedEvent = await Event.findByIdAndUpdate(
+    id,
+    {
+      isActive: !event.isActive,
+    },
+    {
+      new: true,
+      runValidators: false,
+    }
+  ).populate("createdBy", "name");
+
+  return {
+    success: true,
+    message: "Event status updated successfully.",
+    data: updatedEvent,
+  };
 };

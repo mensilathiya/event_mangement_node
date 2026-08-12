@@ -66,6 +66,23 @@ const eventSchema = new mongoose.Schema(
       ref: "Admin",
       default: null,
     },
+
+    // Soft-delete fields, matching the same pattern already used on
+    // Booking (isDeleted / deletedAt / deletedBy). Deleting an event
+    // never hard-removes the document — see eventService.deleteEvent.
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Admin",
+      default: null,
+    },
   },
   {
     timestamps: true,

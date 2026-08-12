@@ -49,13 +49,10 @@ exports.getAllEvents = async (req, res, next) => {
 // Update Event
 exports.updateEvent = async (req, res, next) => {
   try {
-    // Same convention as createEvent: adminId comes from the
-    // authenticated admin (via `protect`), never from the request body.
     const event = await eventService.updateEvent(
       req.params.id,
       req.body,
-      req.file,
-      req.user.id
+      req.file
     );
 
     return res.status(200).json({
@@ -70,7 +67,7 @@ exports.updateEvent = async (req, res, next) => {
 // Delete Event
 exports.deleteEvent = async (req, res, next) => {
   try {
-    const result = await eventService.deleteEvent(req.params.id);
+    const result = await eventService.deleteEvent(req.params.id, req.user.id);
 
     return res.status(200).json(result);
   } catch (error) {
