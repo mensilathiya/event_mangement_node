@@ -187,61 +187,40 @@ const getProfile = async (req,res) => {
 
 const updateProfile = async (req, res) => {
     try {
-        // Admin identity always comes from the authenticated token,
-        // never from the request body (req.body.id / req.body.adminId ignored)
-        const adminId = req.user.id;
-        const { name, email, mobile } = req.body;
+        // Same model-resolution pattern already used by getProfile: which
+        // collection to hit is taken from req.user.role (set correctly by
+        // the protect middleware for both Admin and User/Checker), never
+        // hardcoded to Admin.
+        const accountId = req.user.id;
+        const { name } = req.body;
+        const isAdmin = req.user.role === "admin";
+        const Model = isAdmin ? Admin : User;
 
-        const admin = await Admin.findById(adminId);
+        const account = await Model.findById(accountId);
 
-        if (!admin) {
+        if (!account) {
             return res.status(404).json({
                 success:false,
-                message:"Admin not found",
+                message: isAdmin ? "Admin not found" : "User not found",
             });
         }
 
-        // Email must be unique, but not clash with the admin's own current email
-        const emailTaken = await Admin.findOne({
-            email,
-            _id:{ $ne:adminId },
-        });
-
-        if (emailTaken) {
-            return res.status(400).json({
-                success:false,
-                message:"Email is already in use by another admin",
-            });
-        }
-
-        // Same uniqueness check for mobile
-        const mobileTaken = await Admin.findOne({
-            mobile,
-            _id:{ $ne:adminId },
-        });
-
-        if (mobileTaken) {
-            return res.status(400).json({
-                success:false,
-                message:"Mobile number is already in use by another admin",
-            });
-        }
+       
 
         // Only these 3 fields are ever touched here.
         // _id, password, role, status are never assigned from req.body.
-        admin.name = name;
-        admin.email = email;
-        admin.mobile = mobile;
+        account.name = name;
+       
 
-        await admin.save();
+        await account.save();
 
-        const updatedAdmin = admin.toObject();
-        delete updatedAdmin.password;
+        const updatedAccount = account.toObject();
+        delete updatedAccount.password;
 
         return res.status(200).json({
             success:true,
             message:"Profile updated successfully",
-            data:updatedAdmin,
+            data:updatedAccount,
         });
 
     } catch(error) {
@@ -255,10 +234,12 @@ const updateProfile = async (req, res) => {
 
 const resetPassword = async (req, res) => {
     try {
-        // Admin identity always comes from the authenticated token,
-        // never from req.body (adminId / userId / _id are ignored)
-        const adminId = req.user.id;
+        // Same model-resolution pattern already used by getProfile — see
+        // the matching comment in updateProfile.
+        const accountId = req.user.id;
         const { currentPassword, newPassword, confirmPassword } = req.body;
+        const isAdmin = req.user.role === "admin";
+        const Model = isAdmin ? Admin : User;
 
         // newPassword === confirmPassword is already enforced by
         // resetPasswordValidation, this is just a defensive re-check
@@ -271,18 +252,18 @@ const resetPassword = async (req, res) => {
 
         // password has select:false on the schema, so it must be
         // explicitly requested here
-        const admin = await Admin.findById(adminId).select("+password");
+        const account = await Model.findById(accountId).select("+password");
 
-        if (!admin) {
+        if (!account) {
             return res.status(404).json({
                 success:false,
-                message:"Admin not found",
+                message: isAdmin ? "Admin not found" : "User not found",
             });
         }
 
         const isCurrentPasswordMatch = await bcrypt.compare(
             currentPassword,
-            admin.password
+            account.password
         );
 
         if (!isCurrentPasswordMatch) {
@@ -294,7 +275,7 @@ const resetPassword = async (req, res) => {
 
         const isSameAsCurrentPassword = await bcrypt.compare(
             newPassword,
-            admin.password
+            account.password
         );
 
         if (isSameAsCurrentPassword) {
@@ -304,11 +285,11 @@ const resetPassword = async (req, res) => {
             });
         }
 
-        // Do NOT hash here — the Admin schema's pre("save") middleware
-        // already hashes password on save. Hashing again here would
-        // double-hash it.
-        admin.password = newPassword;
-        await admin.save();
+        // Do NOT hash here — both the Admin and User schemas' pre("save")
+        // middleware already hash password on save. Hashing again here
+        // would double-hash it.
+        account.password = newPassword;
+        await account.save();
 
         return res.status(200).json({
             success:true,

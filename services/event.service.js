@@ -1,6 +1,8 @@
 const mongoose = require("mongoose");
 const Event = require("../models/event.model");
 const TicketType = require("../models/ticketType.model");
+const Booking = require("../models/booking.model");
+const BookingTicket = require("../models/bookingTicket.model");
 const uploadToCloudinary = require("../utils/cloudinary.util");
 
 // Create Event
@@ -208,4 +210,107 @@ exports.changeEventStatus = async (id) => {
     message: "Event status updated successfully.",
     data: updatedEvent,
   };
+};
+
+// ================= DELETE EXPIRED EVENTS (AUTOMATIC CLEANUP) =================
+// Invoked on a recurring schedule by schedulers/eventExpiry.scheduler.js —
+// never by an Admin action. An event is "expired" purely by
+// endDateTime < now, the same check already used elsewhere (e.g.
+// bookingService.createBooking's expiry guard, dashboardService's
+// getActiveEvent) — isActive is not part of the expiry test.
+//
+// For every expired event, all data that explicitly references it via
+// eventId is permanently removed — BookingTicket, Booking, and TicketType
+// (TicketType.eventId is a required ref to Event, the same relationship
+// Booking/BookingTicket already have) — and then the Event document
+// itself is deleted (not soft-deleted).
+//
+// Each event is cleaned up inside its own transaction, in its own
+// try/catch, so:
+//   - a failure on one event is logged and skipped, never thrown, so it
+//     can't stop the remaining expired events from being processed.
+//   - every delete is scoped by that event's own eventId, so another
+//     event's Booking/BookingTicket/TicketType documents are never
+//     touched.
+//   - booking/ticket numbers come from the shared Counter documents
+//     (`BOOKING_${year}` / `TICKET_${year}` in counters.model.js), which
+//     are keyed by year, not by eventId. This function never reads or
+//     writes the Counter collection, so no other event's numbering
+//     sequence is ever affected by an expired event's deletion.
+exports.deleteExpiredEvents = async () => {
+  const now = new Date();
+
+  // Only truly expired events. isDeleted is intentionally not filtered
+  // on: a soft-deleted event whose endDateTime has also passed still has
+  // Booking/BookingTicket/TicketType data that needs to be purged.
+  const expiredEvents = await Event.find({
+    endDateTime: { $lt: now },
+  })
+    .select("_id title endDateTime")
+    .lean();
+
+  const summary = {
+    processed: 0,
+    failed: 0,
+    details: [],
+  };
+
+  for (const expiredEvent of expiredEvents) {
+    const eventId = expiredEvent._id;
+    const session = await mongoose.startSession();
+
+    try {
+      session.startTransaction();
+
+      const ticketResult = await BookingTicket.deleteMany(
+        { eventId },
+        { session }
+      );
+
+      const bookingResult = await Booking.deleteMany(
+        { eventId },
+        { session }
+      );
+
+      const ticketTypeResult = await TicketType.deleteMany(
+        { eventId },
+        { session }
+      );
+
+      await Event.deleteOne({ _id: eventId }, { session });
+
+      await session.commitTransaction();
+
+      summary.processed += 1;
+      summary.details.push({
+        eventId,
+        title: expiredEvent.title,
+        bookingsDeleted: bookingResult.deletedCount,
+        bookingTicketsDeleted: ticketResult.deletedCount,
+        ticketTypesDeleted: ticketTypeResult.deletedCount,
+      });
+    } catch (error) {
+      if (session.inTransaction()) {
+        await session.abortTransaction();
+      }
+
+      summary.failed += 1;
+      summary.details.push({
+        eventId,
+        title: expiredEvent.title,
+        error: error.message,
+      });
+
+      console.error(
+        `[deleteExpiredEvents] cleanup failed for event ${eventId}:`,
+        error
+      );
+      // Not re-thrown — this event's failure must not prevent the loop
+      // below from continuing to the next expired event.
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  return summary;
 };

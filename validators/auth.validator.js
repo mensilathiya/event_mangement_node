@@ -29,21 +29,6 @@ const updateProfileValidation = [
     .trim()
     .notEmpty()
     .withMessage("Name is required"),
-
-  body("email")
-    .trim()
-    .notEmpty()
-    .withMessage("Email is required")
-    .isEmail()
-    .withMessage("Please enter a valid email address")
-    .customSanitizer((value) => value.toLowerCase()),
-
-  body("mobile")
-    .trim()
-    .notEmpty()
-    .withMessage("Mobile number is required")
-    .matches(/^[0-9]{10}$/)
-    .withMessage("Mobile number must be exactly 10 digits"),
 ];
 
 const resetPasswordValidation = [
