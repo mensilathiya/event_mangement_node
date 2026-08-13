@@ -165,7 +165,11 @@ const createBooking = async (data, createdBy) => {
 
     for (let i = 0; i < bookingQuantity; i++) {
       // Generate Ticket Number
-      const ticketNumber = await generateTicketNumber(session);
+      const ticketNumber = await generateTicketNumber(
+        event._id,
+        eventCode,
+        session
+      );
 
       // Generate JWT Token
       const qrToken = generateQrToken({

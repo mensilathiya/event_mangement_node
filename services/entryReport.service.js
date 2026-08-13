@@ -57,6 +57,19 @@ const istEndOfDayUtc = (dateStr) => {
   return new Date(nextDayIstMidnight.getTime() - 1);
 };
 
+// ================= ACTIVE EVENT FILTER (SHARED) =================
+// Single definition of "active event" for this module: isActive === true
+// AND endDateTime not yet passed, evaluated against the current time on
+// every call (mirrors the equivalent check already used elsewhere in the
+// project, e.g. dashboardService's getActiveEvent / bookingService's
+// expiry guard). getAllEntryReports, exportEntryReport, and
+// getActiveEvents below all call this instead of each redefining the
+// condition inline, so there is exactly one place it's expressed here.
+const activeEventFilter = () => ({
+  isActive: true,
+  endDateTime: { $gte: new Date() },
+});
+
 // Restricts a query filter to only the records the authenticated user is
 // allowed to see. Admin (role "admin", set from the previous auth step)
 // is left completely unrestricted — existing behavior. Any other role
@@ -72,6 +85,25 @@ const applyScannerScope = (filter, currentUser) => {
   }
 };
 
+// ================= GET ACTIVE EVENTS (FOR EVENT DROPDOWN) =================
+// Backs the Entry Report page's Event dropdown. Reuses activeEventFilter()
+// — the exact same condition getAllEntryReports/exportEntryReport already
+// use to resolve a single active event — so the dropdown can never list
+// (and the report can never be scoped to) an event that condition would
+// otherwise reject. Sorted ascending by startDateTime, same ordering
+// convention as the rest of this module. Access itself is already gated
+// by the same protect + authorize("admin", "checker", { permission:
+// "Entry Report" }) middleware as the rest of the Entry Report routes, so
+// no separate per-user event visibility filter is needed here.
+const getActiveEvents = async () => {
+  const events = await Event.find(activeEventFilter())
+    .sort({ startDateTime: 1 })
+    .select("_id name title eventCode startDateTime endDateTime")
+    .lean();
+
+  return events;
+};
+
 // ================= GET ALL ENTRY REPORT =================
 const getAllEntryReports = async (query, currentUser) => {
   let {
@@ -84,6 +116,7 @@ const getAllEntryReports = async (query, currentUser) => {
     search = "",
     startDate,
     endDate,
+    eventId: requestedEventId,
   } = query;
 
   page = parseInt(page, 10) || 1;
@@ -91,34 +124,35 @@ const getAllEntryReports = async (query, currentUser) => {
   const skip = (page - 1) * limit;
 
   // ================= ACTIVE EVENT =================
-  // Always resolved server-side from the currently active event. A client-
-  // supplied eventId is never trusted here, so Entry Report can never
-  // return records from an inactive/unrelated event even if a stale or
-  // forged eventId were sent from the frontend.
+  // The frontend now selects a specific event (Event dropdown) and sends
+  // its id as eventId. That id is still never trusted blindly — it must
+  // also satisfy the same activeEventFilter() every other event lookup in
+  // this module uses, so Entry Report can never return records from an
+  // inactive/expired/forged eventId.
   //
-  // "Active" requires BOTH isActive === true AND endDateTime not yet
-  // passed, checked against the current time on every request. isActive
-  // stays a manually controlled flag (never written here); endDateTime is
-  // what makes this time-accurate without a cron job or scheduler.
-  //
-  // Sorted ascending by startDateTime so event selection is deterministic
-  // when multiple events match: a Running event (startDateTime <= now)
-  // always sorts ahead of any Upcoming event (startDateTime > now),
-  // matching the same Running-first, nearest-Upcoming-otherwise priority
-  // Dashboard uses.
-  const now = new Date();
+  // If eventId isn't supplied at all (older/legacy callers), fall back to
+  // the previous default: the single "current" active event, sorted
+  // ascending by startDateTime so a Running event (startDateTime <= now)
+  // always sorts ahead of any Upcoming event — same as before.
+  let activeEvent;
 
-  const activeEvent = await Event.findOne({
-    isActive: true,
-    endDateTime: { $gte: now },
-  })
-    .sort({ startDateTime: 1 })
-    .select("_id name title startDateTime endDateTime")
-    .lean();
+  if (requestedEventId) {
+    activeEvent = await Event.findOne({
+      _id: requestedEventId,
+      ...activeEventFilter(),
+    })
+      .select("_id name title startDateTime endDateTime")
+      .lean();
+  } else {
+    activeEvent = await Event.findOne(activeEventFilter())
+      .sort({ startDateTime: 1 })
+      .select("_id name title startDateTime endDateTime")
+      .lean();
+  }
 
   if (!activeEvent) {
-    // No active event: respond gracefully so the UI can show its normal
-    // empty state instead of an error.
+    // No matching active event: respond gracefully so the UI can show its
+    // normal empty state instead of an error.
     return {
       event: null,
       rows: [],
@@ -246,23 +280,29 @@ const exportEntryReport = async (query, res, currentUser) => {
     search = "",
     startDate,
     endDate,
+    eventId: requestedEventId,
   } = query;
 
   // ================= ACTIVE EVENT =================
-  // Same server-side enforcement as getAllEntryReports — export always
-  // targets the currently active event, never a client-supplied eventId,
-  // and "active" requires both isActive === true and endDateTime not yet
-  // passed, checked against the current time on every request. Sorted the
-  // same way as getAllEntryReports so export always agrees with the table.
-  const now = new Date();
+  // Same resolution as getAllEntryReports: prefer the client-supplied
+  // eventId (still constrained to activeEventFilter()), so export always
+  // targets the same event currently selected in the table. Falls back to
+  // the previous single-active-event default when no eventId is sent.
+  let activeEvent;
 
-  const activeEvent = await Event.findOne({
-    isActive: true,
-    endDateTime: { $gte: now },
-  })
-    .sort({ startDateTime: 1 })
-    .select("_id name title startDateTime endDateTime")
-    .lean();
+  if (requestedEventId) {
+    activeEvent = await Event.findOne({
+      _id: requestedEventId,
+      ...activeEventFilter(),
+    })
+      .select("_id name title startDateTime endDateTime")
+      .lean();
+  } else {
+    activeEvent = await Event.findOne(activeEventFilter())
+      .sort({ startDateTime: 1 })
+      .select("_id name title startDateTime endDateTime")
+      .lean();
+  }
 
   if (!activeEvent) {
     throw new Error("No active event found.");
@@ -471,6 +511,7 @@ const exportEntryReport = async (query, res, currentUser) => {
 };
 
 module.exports = {
+  getActiveEvents,
   getAllEntryReports,
   exportEntryReport,
 };

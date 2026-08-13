@@ -11,6 +11,15 @@ const {
   getAllEntryReportValidation,
   exportEntryReportValidation,
 } = require("../validators/entryReport.validation");
+// get active events (for the Event dropdown)
+// Same access rule as the rest of this module: Admin always has access;
+// a Checker additionally needs the "Entry Report" permission.
+router.get(
+  "/active-events",
+  protect,
+  authorize("admin", "checker", { permission: "Entry Report" }),
+  entryReportController.getActiveEvents
+);
 // get all entery report
 // Admin always has access; a Checker additionally needs the
 // "Entry Report" permission on their User document.

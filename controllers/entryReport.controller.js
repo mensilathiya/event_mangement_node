@@ -1,4 +1,18 @@
 const entryReportService = require("../services/entryReport.service");
+// get active events (for the Entry Report Event dropdown)
+const getActiveEvents = async (req, res, next) => {
+  try {
+    const events = await entryReportService.getActiveEvents();
+
+    return res.status(200).json({
+      success: true,
+      message: "Active events fetched successfully.",
+      data: events,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 // get all entery report
 const getAllEntryReports = async (req, res, next) => {
   try {
@@ -33,6 +47,7 @@ const exportEntryReport = async (req, res, next) => {
 };
 
 module.exports = {
+  getActiveEvents,
   getAllEntryReports,
   exportEntryReport,
 };
