@@ -4,6 +4,7 @@ const TicketType = require("../models/ticketType.model");
 const Booking = require("../models/booking.model");
 const BookingTicket = require("../models/bookingTicket.model");
 const uploadToCloudinary = require("../utils/cloudinary.util");
+const generateEventCode = require("../utils/generateEventCode");
 
 // Create Event
 exports.createEvent = async (data, file, adminId) => {
@@ -20,6 +21,10 @@ exports.createEvent = async (data, file, adminId) => {
     imagePublicId = uploadedImage.public_id;
   }
 
+  // Assigned once, atomically, and never changed afterward — see
+  // eventCode's comment in event.model.js.
+  const eventCode = await generateEventCode();
+
   const event = await Event.create({
     title: data.title,
     description: data.description,
@@ -34,6 +39,7 @@ exports.createEvent = async (data, file, adminId) => {
     image: imageUrl,
     imagePublicId: imagePublicId,
     createdBy: adminId || null,
+    eventCode,
     // Written explicitly (not left to the schema default alone) so every
     // new event is guaranteed to have this field stored in MongoDB from
     // the moment it's created, regardless of the schema default.
@@ -41,6 +47,50 @@ exports.createEvent = async (data, file, adminId) => {
   });
 
   return event;
+};
+
+// ================= GET OR CREATE EVENT CODE (LEGACY BACKFILL) =================
+// Only relevant for events created before the eventCode field existed.
+// Every event created via createEvent() above already has one. Called
+// from bookingService.createBooking right before generating that
+// booking's number, so a legacy event's code is assigned lazily, exactly
+// once, the first time someone books it after this change is deployed.
+//
+// Concurrency-safe: if two bookings for the same legacy event are being
+// created at the same moment, both may generate a candidate code, but
+// only one findOneAndUpdate can match `eventCode: { $exists: false }` and
+// actually persist it — the loser simply re-reads whichever code won and
+// uses that instead, so the event can never end up stamped with two
+// different codes. `eventDoc` is a Mongoose document from within the
+// caller's transaction; passing the same `session` keeps this update
+// inside that same transaction.
+exports.getOrCreateEventCode = async (eventDoc, session) => {
+  if (eventDoc.eventCode) {
+    return eventDoc.eventCode;
+  }
+
+  const candidateCode = await generateEventCode(session);
+
+  const updated = await Event.findOneAndUpdate(
+    { _id: eventDoc._id, eventCode: { $exists: false } },
+    { $set: { eventCode: candidateCode } },
+    { new: true, session }
+  );
+
+  if (updated) {
+    eventDoc.eventCode = updated.eventCode;
+    return updated.eventCode;
+  }
+
+  // Someone else won the race between our read and this update — use
+  // the code they set instead of the one we generated (which is simply
+  // left unused, same as any other rolled-back counter increment).
+  const existing = await Event.findById(eventDoc._id)
+    .select("eventCode")
+    .session(session);
+
+  eventDoc.eventCode = existing.eventCode;
+  return existing.eventCode;
 };
 
 // Get Event By Id

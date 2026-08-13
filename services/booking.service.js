@@ -8,13 +8,24 @@ const generateQrToken = require("../utils/generateQrToken");
 const generateQrCode = require("../utils/generateQrCode");
 const uploadToCloudinary = require("../utils/cloudinary.util");
 const AppError = require("../utils/AppError");
+const eventService = require("./event.service");
 const mongoose = require("mongoose");
-// booking number
-const generateBookingNumber = async (session) => {
-  const year = new Date().getFullYear();
 
+// ================= EVENT-WISE BOOKING NUMBER =================
+// Was previously a single global counter keyed by year
+// (`BOOKING_${year}`), producing e.g. "BK2026000123" shared across every
+// event. Now keyed by the event's own `eventId` (`BOOKING_${eventId}`),
+// so each event gets its own independent sequence that always starts at
+// BK001 and is never shared with, or affected by, any other event —
+// including one that has since been deleted by the expiry scheduler,
+// since eventId-keyed Counter documents are never touched by that
+// scheduler and stay unique forever. Still a single atomic
+// findOneAndUpdate $inc/upsert (same pattern as before and as
+// generateTicketNumber.js), so two simultaneous bookings for the same
+// event can never receive the same number.
+const generateBookingNumber = async (eventId, eventCode, session) => {
   const counter = await Counter.findOneAndUpdate(
-    { name: `BOOKING_${year}` },
+    { name: `BOOKING_${eventId}` },
     { $inc: { sequence: 1 } },
     {
       new: true,
@@ -23,7 +34,7 @@ const generateBookingNumber = async (session) => {
     }
   );
 
-  return `BK${year}${String(counter.sequence).padStart(6, "0")}`;
+  return `${eventCode}-BK${String(counter.sequence).padStart(3, "0")}`;
 };
 
 // post api
@@ -109,7 +120,12 @@ const createBooking = async (data, createdBy) => {
       );
     }
 
-    const bookingNumber = await generateBookingNumber(session);
+    const eventCode = await eventService.getOrCreateEventCode(event, session);
+    const bookingNumber = await generateBookingNumber(
+      event._id,
+      eventCode,
+      session
+    );
 
     // ================= PASS DATE =================
     // TicketType's date field is `allowDates` — an array, not a single
@@ -205,9 +221,53 @@ const createBooking = async (data, createdBy) => {
   }
 };
 
+// ================= RESOLVE EVENT SCOPE (MULTIPLE ACTIVE EVENTS) =================
+// Shared by getAllBookings and exportBookings so the table and the export
+// can never diverge on which events they cover.
+//
+// - eventId supplied: scope is exactly that one event, and ONLY if it's
+//   still a real, non-deleted, non-expired event — never blindly trusted,
+//   so a stale/expired eventId can't leak bookings that should already be
+//   gone. (There's a small window, up to one scheduler tick, where an
+//   event has expired but the expiry scheduler hasn't deleted it yet;
+//   this check keeps that window's bookings from showing rather than
+//   waiting for the scheduler.)
+// - eventId omitted: scope is EVERY currently active (isActive: true),
+//   non-deleted, non-expired event — not just the first one — so bookings
+//   from Event A and Event B are both included when both are active.
+//   Previously this used Event.findOne(...), which silently discarded
+//   every active event but the earliest-starting one.
+const resolveEventScope = async (eventId) => {
+  const now = new Date();
+
+  if (eventId) {
+    const event = await Event.findOne({
+      _id: eventId,
+      isDeleted: { $ne: true },
+      endDateTime: { $gte: now },
+    }).select("_id title startDateTime endDateTime");
+
+    return event ? { eventIds: [event._id], events: [event] } : { eventIds: [], events: [] };
+  }
+
+  const activeEvents = await Event.find({
+    isActive: true,
+    isDeleted: { $ne: true },
+    endDateTime: { $gte: now },
+  })
+    .sort({ startDateTime: 1 })
+    .select("_id title startDateTime endDateTime");
+
+  return {
+    eventIds: activeEvents.map((event) => event._id),
+    events: activeEvents,
+  };
+};
+
 // ================= GET ALL BOOKINGS =================
 const getAllBookings = async (query) => {
   const {
+    eventId,
     page = 1,
     limit = 10,
     bookingId,
@@ -224,24 +284,15 @@ const getAllBookings = async (query) => {
   const currentPage = Math.max(Number(page) || 1, 1);
   const pageLimit = Math.max(Number(limit) || 10, 1);
 
-  // ================= FIND ACTIVE EVENT =================
-  // Same priority as Dashboard: isActive + not yet expired, sorted
-  // ascending by startDateTime so a Running event (startDateTime <= now)
-  // always sorts ahead of any Upcoming event (startDateTime > now), and
-  // the nearest Upcoming event wins when nothing is Running.
-  const now = new Date();
+  // ================= RESOLVE EVENT(S) =================
+  // A specific eventId → only that event. No eventId → every currently
+  // active event, combined (see resolveEventScope above).
+  const { eventIds, events } = await resolveEventScope(eventId);
 
-  const activeEvent = await Event.findOne({
-    isActive: true,
-    endDateTime: { $gte: now },
-  })
-    .sort({ startDateTime: 1 })
-    .select("_id title startDateTime endDateTime");
-
-  // ================= NO ACTIVE EVENT =================
-  if (!activeEvent) {
+  // ================= NO MATCHING EVENT(S) =================
+  if (eventIds.length === 0) {
     return {
-      event: null,
+      events: [],
       rows: [],
       pagination: {
         page: currentPage,
@@ -254,7 +305,7 @@ const getAllBookings = async (query) => {
 
   // ================= BUILD FILTER =================
   const filter = {
-    eventId: activeEvent._id,
+    eventId: { $in: eventIds },
   };
 
   // ================= DELETED / SUCCESS STATUS =================
@@ -380,7 +431,7 @@ const getAllBookings = async (query) => {
 
   // ================= RESPONSE =================
   return {
-    event: activeEvent,
+    events,
     rows: bookings,
     pagination: {
       page: currentPage,
@@ -418,6 +469,7 @@ const deleteBooking = async (bookingId, remark, deletedBy) => {
 // ================= EXPORT ALL BOOKINGS =================
 const exportBookings = async (query, res) => {
   const {
+    eventId,
     bookingId,
     mobileNumber,
     name,
@@ -428,26 +480,20 @@ const exportBookings = async (query, res) => {
     search,
   } = query;
 
-  // ================= FIND ACTIVE EVENT =================
-  // Same priority as Dashboard/getAllBookings: isActive + not yet expired,
-  // sorted ascending by startDateTime so Running is preferred over
-  // Upcoming, and the nearest Upcoming event wins otherwise.
-  const now = new Date();
+  // ================= RESOLVE EVENT(S) =================
+  // Same resolution as getAllBookings (see resolveEventScope above), so
+  // the exported file always matches what the table is showing: a
+  // specific eventId if supplied, otherwise every currently active event
+  // combined — never just the single earliest one.
+  const { eventIds } = await resolveEventScope(eventId);
 
-  const activeEvent = await Event.findOne({
-    isActive: true,
-    endDateTime: { $gte: now },
-  })
-    .sort({ startDateTime: 1 })
-    .select("_id title startDateTime endDateTime");
-
-  if (!activeEvent) {
+  if (eventIds.length === 0) {
     throw new AppError("No active event found.", 404);
   }
 
   // ================= BUILD FILTER =================
   const filter = {
-    eventId: activeEvent._id,
+    eventId: { $in: eventIds },
   };
 
   // ================= DELETED / SUCCESS STATUS =================

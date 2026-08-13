@@ -26,6 +26,37 @@ const endOfDayUtc = (dateStr) => {
   return d;
 };
 
+// ================= IST DATE BOUNDARIES =================
+// BookingTicket.passDate is copied directly from TicketType.allowDates[0]
+// at booking time (see booking.service.js) — and allowDates are captured
+// by the Ticket Type date picker as IST midnight of the selected calendar
+// day. Concretely: selecting "14-08-2026" in that picker stores
+// 2026-08-13T18:30:00.000Z (14 Aug 00:00 IST = 13 Aug 18:30 UTC), NOT
+// 2026-08-14T00:00:00.000Z. So a naive `new Date(dateStr)` on a
+// "YYYY-MM-DD" query param (which parses as UTC midnight of that date)
+// would be 5.5 hours later than the actual stored instant for that same
+// IST calendar day — enough to miss it entirely in a $gte/$lte compare.
+//
+// IST is a fixed UTC+5:30 offset with no DST, so a constant offset is
+// correct here (not a reason to pull in a timezone library).
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+// The UTC instant representing 00:00 IST on the given "YYYY-MM-DD" date —
+// i.e. exactly what gets stored for that calendar date's passDate.
+const istMidnightUtc = (dateStr) =>
+  new Date(new Date(dateStr).getTime() - IST_OFFSET_MS);
+
+// The UTC instant one millisecond before the *next* IST calendar day
+// begins — i.e. the inclusive upper bound covering every moment of the
+// given IST calendar date, mirroring how endOfDayUtc works for the
+// (UTC-midnight-based) scannedAt boundary above.
+const istEndOfDayUtc = (dateStr) => {
+  const nextDayIstMidnight = new Date(
+    istMidnightUtc(dateStr).getTime() + 24 * 60 * 60 * 1000
+  );
+  return new Date(nextDayIstMidnight.getTime() - 1);
+};
+
 // Restricts a query filter to only the records the authenticated user is
 // allowed to see. Admin (role "admin", set from the previous auth step)
 // is left completely unrestricted — existing behavior. Any other role
@@ -145,14 +176,14 @@ const getAllEntryReports = async (query, currentUser) => {
   }
 
   if (startDate || endDate) {
-    filter.scannedAt = {};
+    filter.passDate = {};
 
     if (startDate) {
-      filter.scannedAt.$gte = new Date(startDate);
+      filter.passDate.$gte = istMidnightUtc(startDate);
     }
 
     if (endDate) {
-      filter.scannedAt.$lte = endOfDayUtc(endDate);
+      filter.passDate.$lte = istEndOfDayUtc(endDate);
     }
   }
 
@@ -185,7 +216,7 @@ const getAllEntryReports = async (query, currentUser) => {
 
     mobileNumber: ticket.attendee?.mobileNumber || "-",
 
-    passDate: activeEvent.startDateTime || null,
+    passDate: ticket.passDate || null,
 
     scannedAt: ticket.scannedAt || null,
   }));
@@ -284,14 +315,14 @@ const exportEntryReport = async (query, res, currentUser) => {
   }
 
   if (startDate || endDate) {
-    filter.scannedAt = {};
+    filter.passDate = {};
 
     if (startDate) {
-      filter.scannedAt.$gte = new Date(startDate);
+      filter.passDate.$gte = istMidnightUtc(startDate);
     }
 
     if (endDate) {
-      filter.scannedAt.$lte = endOfDayUtc(endDate);
+      filter.passDate.$lte = istEndOfDayUtc(endDate);
     }
   }
 
@@ -303,6 +334,7 @@ const exportEntryReport = async (query, res, currentUser) => {
       ticketNumber
       qrImage
       scannedAt
+      passDate
       attendee
     `)
     .sort({ scannedAt: -1 })
@@ -383,9 +415,17 @@ const exportEntryReport = async (query, res, currentUser) => {
   };
 
   // ================= ROWS =================
-  // Pass Date reflects the active event's own date (same source used by
-  // getAllEntryReports), rather than each ticket's createdAt, so the
-  // exported file and the on-screen table always agree.
+  // Pass Date now reflects each ticket's own stored passDate (from
+  // BookingTicket, copied from its TicketType's allowDates[0] at booking
+  // time), not the active event's date — so the exported file matches
+  // what's actually on each ticket, and matches the on-screen table
+  // (getAllEntryReports above uses the same field). The explicit
+  // Asia/Kolkata timeZone is required here: passDate is stored as the
+  // UTC instant of IST midnight (e.g. 14-08-2026 IST is stored as
+  // 2026-08-13T18:30:00.000Z), and toLocaleDateString without an explicit
+  // timeZone uses the Node process's own timezone — commonly UTC on a
+  // server — which would print 13/08/2026 instead of the correct
+  // 14/08/2026.
 
   rows.forEach((item) => {
     worksheet.addRow({
@@ -397,8 +437,10 @@ const exportEntryReport = async (query, res, currentUser) => {
 
       mobile: item.attendee?.mobileNumber || "-",
 
-      passDate: activeEvent.startDateTime
-        ? new Date(activeEvent.startDateTime).toLocaleDateString("en-GB")
+      passDate: item.passDate
+        ? new Date(item.passDate).toLocaleDateString("en-GB", {
+            timeZone: "Asia/Kolkata",
+          })
         : "-",
 
       scannedAt: item.scannedAt
