@@ -6,18 +6,37 @@ const BookingTicket = require("../models/bookingTicket.model");
 const uploadToCloudinary = require("../utils/cloudinary.util");
 const generateEventCode = require("../utils/generateEventCode");
 
-// ================= EVENT DISPLAY STATUS =================
-// Purely a read-time/display concept — never persisted, never written to
-// `isActive`. An event whose endDateTime has passed is always shown as
-// "Expired", regardless of isActive (which is left completely untouched
-// by expiry — see deleteEvent/updateEvent for the same rule elsewhere).
-// Otherwise it falls back to the existing isActive flag.
-const getEventDisplayStatus = (event) => {
-  if (event.endDateTime && new Date(event.endDateTime) < new Date()) {
-    return "Expired";
+// ================= EVENT EXPIRY STATUS SYNC (NO CRON) =================
+// Persists the derived expiry status onto the Event document itself,
+// without any scheduler/cron/background job — it is called inline from
+// the existing read/update paths below (getEventById, getAllEvents,
+// updateEvent), so the stored `status` field self-heals to the correct
+// value the next time the event is touched by the app, and the database
+// explicitly reflects "Expired" once endDateTime has passed.
+//
+// Deliberately independent of `isActive`: `isActive` remains a manual
+// admin-controlled flag (changed only via changeEventStatus) and is
+// never read or written here.
+//
+// Only issues a write when the stored value actually needs to change,
+// so a normal (non-expired) read path costs zero extra writes. Works on
+// both a full Mongoose document and a lean object — either way `event`
+// is mutated in place so the caller's already-fetched object reflects
+// the corrected value immediately, with no second read required.
+const syncEventExpiryStatus = async (event) => {
+  const expectedStatus =
+    event.endDateTime && new Date(event.endDateTime) < new Date()
+      ? "Expired"
+      : "Active";
+
+  if (event.status === expectedStatus) {
+    return event;
   }
 
-  return event.isActive ? "Active" : "Inactive";
+  await Event.updateOne({ _id: event._id }, { $set: { status: expectedStatus } });
+  event.status = expectedStatus;
+
+  return event;
 };
 
 // Create Event
@@ -117,6 +136,8 @@ exports.getEventById = async (id) => {
     return null;
   }
 
+  await syncEventExpiryStatus(event);
+
   const tickets = await TicketType.find(
     { eventId: id, isDeleted: false },
     { ticketName: 1, _id: 0 }
@@ -125,9 +146,6 @@ exports.getEventById = async (id) => {
   return {
     ...event,
     ticketTypes: tickets.map((ticket) => ticket.ticketName),
-    // Display-only field — see getEventDisplayStatus. isActive above is
-    // still the raw stored value and is left exactly as-is.
-    status: getEventDisplayStatus(event),
   };
 };
 
@@ -154,17 +172,14 @@ exports.getAllEvents = async (query) => {
     .skip((page - 1) * limit)
     .limit(limit);
 
-  // Display-only status field appended per event — see
-  // getEventDisplayStatus. Does not touch the stored isActive value.
-  const eventsWithStatus = events.map((event) => ({
-    ...event.toObject(),
-    status: getEventDisplayStatus(event),
-  }));
+  // Self-heals each event's persisted `status` before returning — see
+  // syncEventExpiryStatus. Does not touch isActive.
+  await Promise.all(events.map((event) => syncEventExpiryStatus(event)));
 
   return {
     success: true,
     message: "Events fetched successfully.",
-    data: eventsWithStatus,
+    data: events,
     pagination: {
       total,
       page,
@@ -227,6 +242,11 @@ exports.updateEvent = async (id, data, file) => {
     }
   ).populate("createdBy", "name");
 
+  // endDateTime may have just changed (earlier or later), so re-resolve
+  // and persist the correct expiry status immediately rather than
+  // waiting for the next read.
+  await syncEventExpiryStatus(updatedEvent);
+
   return updatedEvent;
 };
 
@@ -237,7 +257,8 @@ exports.updateEvent = async (id, data, file) => {
 // one and only place Event/Booking/BookingTicket documents are ever
 // permanently removed — there is no automatic/scheduled expiry cleanup
 // anywhere in this backend. Expired events are left fully intact (see
-// getEventDisplayStatus) until an Admin takes this explicit action.
+// syncEventExpiryStatus, which only ever sets status, never deletes)
+// until an Admin takes this explicit action.
 //
 // Cascade order: BookingTickets first, then Bookings, then the Event
 // itself, all inside one transaction so the delete is all-or-nothing.
@@ -299,6 +320,8 @@ exports.changeEventStatus = async (id) => {
       runValidators: false,
     }
   ).populate("createdBy", "name");
+
+  await syncEventExpiryStatus(updatedEvent);
 
   return {
     success: true,

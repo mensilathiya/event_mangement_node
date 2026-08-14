@@ -74,6 +74,19 @@ const eventSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // Explicit, persisted lifecycle status — separate from `isActive`
+    // (which stays a manually-controlled admin flag and is never touched
+    // by expiry logic; see changeEventStatus/updateEvent in
+    // event.service.js). This field only ever tracks time-based expiry:
+    // "Expired" once endDateTime has passed, "Active" otherwise. Kept in
+    // sync lazily (no cron/scheduler) — see
+    // eventService.syncEventExpiryStatus, called from the read/update
+    // paths where an Event is loaded.
+    status: {
+      type: String,
+      enum: ["Active", "Expired"],
+      default: "Active",
+    },
     // Tracks which Admin created this event. Not required so existing
     // documents created before this field was added continue to work —
     // they simply resolve to createdBy: null / not populated.
