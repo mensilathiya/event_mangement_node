@@ -2,6 +2,9 @@ const userService = require("../services/user.service");
 // create user
 const createUser = async (req, res, next) => {
   try {
+    // TEMP DEBUG — remove after confirming upload works
+    console.log("[DEBUG] createUser req.file:", req.file);
+
     const result = await userService.createUser(
       req.user,
       req.body,
@@ -33,6 +36,9 @@ const getUsers = async (req, res, next) => {
 // edit user
 const updateUser = async (req, res, next) => {
   try {
+    // TEMP DEBUG — remove after confirming upload works
+    console.log("[DEBUG] updateUser req.file:", req.file);
+
     const result = await userService.updateUser(
   req.params.id,
   req.body,
