@@ -4,8 +4,6 @@ const BookingTicket = require("../models/bookingTicket.model");
 const AppError = require("../utils/AppError");
  // verfiy qr
 const verifyQr = async ({ qrToken }) => {
-    console.log("QR Token:", qrToken);
-  console.log("Type:", typeof qrToken);
   // ==========================
   // 1. Verify QR Token
   // ==========================
